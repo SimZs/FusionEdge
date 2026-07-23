@@ -26,6 +26,12 @@
 
 // =============================================================================
 
+#if DSP_MODEL == DSP_AXS15231B
+#ifndef AXS_SPECTRUM_FRAME_MS
+#define AXS_SPECTRUM_FRAME_MS 80UL
+#endif
+#endif
+
 SpectrumWidget::~SpectrumWidget() {
     if (_canvas) { delete _canvas; _canvas = nullptr; }
     if (_waveCanvas) { delete _waveCanvas; _waveCanvas = nullptr; }
@@ -68,6 +74,7 @@ void SpectrumWidget::reset() {
     _dualWaveLastFrameMs = 0;
 #if DSP_MODEL == DSP_AXS15231B
     _axsBarsLastFrameMs = 0;
+    _axsSpectrumLastFrameMs = 0;
 #endif
     _dualWaveLevel = 0.0f;
     memset(_dualWaveMainOffset, 0, sizeof(_dualWaveMainOffset));
@@ -727,6 +734,11 @@ void SpectrumWidget::loop() {
     _fadeMs = millis();
     const bool spectrumUpdated = spectrumAnalyzer.process();
     if (!spectrumUpdated && config.store.vuSpecMode != 1) return;
+#if DSP_MODEL == DSP_AXS15231B
+    const uint32_t axsNow = millis();
+    if (_axsSpectrumLastFrameMs != 0 && axsNow - _axsSpectrumLastFrameMs < AXS_SPECTRUM_FRAME_MS) return;
+    _axsSpectrumLastFrameMs = axsNow;
+#endif
     uint8_t spec[64] = {0};
     uint8_t peak[64] = {0};
     bool wantPeak = (config.store.vuPeakOn != 0);

@@ -55,6 +55,7 @@ class SpectrumWidget : public Widget {
     uint32_t       _dualWaveLastFrameMs = 0;
 #if DSP_MODEL == DSP_AXS15231B
     uint32_t       _axsBarsLastFrameMs = 0;
+    uint32_t       _axsSpectrumLastFrameMs = 0;
 #endif
     float          _dualWaveLevel = 0.0f;
     int16_t        _dualWaveMainOffset[SA_BANDS_MAX] = {0};

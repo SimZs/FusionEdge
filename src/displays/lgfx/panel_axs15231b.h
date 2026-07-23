@@ -45,22 +45,6 @@
 #endif
 #endif
 
-#ifndef AXS_FLUSH_CHUNK_DELAY_EVERY
-#if AXS_SMOOTH_SCROLL
-#define AXS_FLUSH_CHUNK_DELAY_EVERY 0
-#else
-#define AXS_FLUSH_CHUNK_DELAY_EVERY 2
-#endif
-#endif
-
-#ifndef AXS_FLUSH_CHUNK_DELAY_MS
-#if AXS_SMOOTH_SCROLL
-#define AXS_FLUSH_CHUNK_DELAY_MS 0
-#else
-#define AXS_FLUSH_CHUNK_DELAY_MS 1
-#endif
-#endif
-
 #ifndef AXS_STABLE_BOOT_FLUSHES
 #define AXS_STABLE_BOOT_FLUSHES 80
 #endif
@@ -511,7 +495,6 @@ private:
     void sendFrameDirect() {
         startQspiMemoryWrite();
         uint_fast16_t outCount = 0;
-        uint8_t chunkCount = 0;
 
         for (int_fast16_t sx = _cfg.memory_width - 1; sx >= 0; --sx) {
             for (uint_fast16_t sy = 0; sy < _cfg.memory_height; ++sy) {
@@ -524,8 +507,10 @@ private:
 
                 if (outCount == FLUSH_PIXELS) {
                     _bus->writeBytes(reinterpret_cast<const uint8_t*>(_flushLine), FLUSH_PIXELS * sizeof(uint16_t), true, true);
+                    // writeBytes() starts DMA asynchronously. The next loop
+                    // iteration reuses _flushLine, so wait before overwriting it.
+                    _bus->wait();
                     outCount = 0;
-                    yieldAfterFlushChunk(++chunkCount);
                 }
             }
         }
@@ -564,7 +549,6 @@ private:
 
         startQspiMemoryWrite();
         const size_t totalPixels = static_cast<size_t>(_cfg.memory_width) * _cfg.memory_height;
-        uint8_t chunkCount = 0;
 
         for (size_t offset = 0; offset < totalPixels; offset += FLUSH_PIXELS) {
             const size_t count = ((totalPixels - offset) > FLUSH_PIXELS) ? FLUSH_PIXELS : (totalPixels - offset);
@@ -578,7 +562,8 @@ private:
             }
 
             _bus->writeBytes(reinterpret_cast<const uint8_t*>(_flushLine), count * sizeof(uint16_t), true, true);
-            yieldAfterFlushChunk(++chunkCount);
+            // _flushLine is reused for the next DMA block.
+            _bus->wait();
         }
 
         _bus->wait();
@@ -670,14 +655,6 @@ private:
         _bus->writeCommand(0x00, 8);
         _bus->writeCommand(cmd, 8);
         _bus->writeCommand(0x00, 8);
-    }
-
-    void yieldAfterFlushChunk(uint8_t chunkCount) {
-        if (AXS_FLUSH_CHUNK_DELAY_EVERY && (chunkCount % AXS_FLUSH_CHUNK_DELAY_EVERY) == 0) {
-            vTaskDelay(pdMS_TO_TICKS(AXS_FLUSH_CHUNK_DELAY_MS));
-        } else {
-            taskYIELD();
-        }
     }
 
     void sendCommand(uint8_t cmd) {
