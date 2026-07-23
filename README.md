@@ -2,7 +2,7 @@
 
 FusionEdge is an ESP32-S3 internet radio firmware built on the yoRadio codebase. It uses LovyanGFX and LittleFS and adds a 480x320 touch-oriented interface, spectrum and waveform visualizations, optional Bluetooth audio input, SD and DLNA playback, WebUI control, encoders, weather information and theme support.
 
-The project grew from the LovyanGFX/LittleFS-based VTom yoRadio variant. FusionEdge keeps the original yoRadio playback architecture while substantially extending the display, controls, audio visualization and source handling.
+The project grew from the LovyanGFX/LittleFS-based [VTom Radio](https://github.com/VaraiTamas/VTomRadio/tree/main) variant. FusionEdge keeps the original yoRadio playback architecture while substantially extending the display, controls, audio visualization and source handling.
 
 ## Main target
 
