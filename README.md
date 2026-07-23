@@ -1,3 +1,7 @@
+<p align="center">
+<img width="1536" height="1024" alt="Fusion_EDGE" src="https://github.com/user-attachments/assets/ac32ea6a-53a3-4aed-b5e3-69afc1bff3bf" />
+</p>
+
 # FusionEdge
 
 FusionEdge is an ESP32-S3 internet radio firmware built on the yoRadio codebase. It uses LovyanGFX and LittleFS and adds a 480x320 touch-oriented interface, spectrum and waveform visualizations, optional Bluetooth audio input, SD and DLNA playback, WebUI control, encoders, weather information and theme support.
