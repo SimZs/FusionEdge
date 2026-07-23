@@ -61,7 +61,7 @@ When an ST7796, XPT2046 and SD card share the same SPI bus, some modules may sho
 ## Project history and credits
 
 - [yoRadio](https://github.com/e2002/yoradio) by e2002 and contributors
-- [VTomRadio](https://github.com/VaraiTamas/VTomRadio/tree/main) LovyanGFX/LittleFS yoRadio variant by Tamás Várai alias VTom
+- [VTomRadio](https://github.com/VaraiTamas/VTomRadio/tree/main) LovyanGFX/LittleFS yoRadio variant by VTom
 - [ESP32-audioI2S](https://github.com/schreibfaul1/ESP32-audioI2S) by schreibfaul1
 - FusionEdge development by SimZs and contributors
 
