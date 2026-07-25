@@ -71,6 +71,7 @@ static uint32_t g_wifiScanStartMs = 0;
 static constexpr uint32_t WIFI_SCAN_CACHE_TTL_MS = 15000;
 static constexpr uint32_t WIFI_SCAN_MAX_WAIT_MS = 15000;
 static bool     g_webboardUploadHadError = false;
+static AsyncWebServerRequest *g_webboardUploadRequest = nullptr;
 
 namespace {
 constexpr uint32_t WS_PLAY_SETTLE_MS = 120;
@@ -121,6 +122,75 @@ void processPendingWsStation() {
     return;
   }
 
+}
+
+bool isWebboardImageAsset(const String &filename) {
+  String lower = filename;
+  lower.toLowerCase();
+  return lower.endsWith(".png") || lower.endsWith(".jpg") || lower.endsWith(".jpeg")
+      || lower.endsWith(".gif") || lower.endsWith(".webp") || lower.endsWith(".bmp")
+      || lower.endsWith(".svg") || lower.endsWith(".ico") || lower == "map.csv";
+}
+
+bool makeWebboardImagePath(const String &filename, String &fullPath) {
+  String relative = filename;
+  relative.replace("\\", "/");
+  while (relative.startsWith("/")) {
+    relative.remove(0, 1);
+  }
+  while (relative.startsWith("./")) {
+    relative.remove(0, 2);
+  }
+  if (relative.startsWith("images/")) {
+    relative.remove(0, 7);
+  }
+  if (!relative.length() || relative.length() > 180) {
+    return false;
+  }
+
+  int from = 0;
+  while (from <= static_cast<int>(relative.length())) {
+    int slash = relative.indexOf('/', from);
+    if (slash < 0) {
+      slash = relative.length();
+    }
+    const String part = relative.substring(from, slash);
+    if (!part.length() || part == "." || part == ".." || part.indexOf(':') >= 0) {
+      return false;
+    }
+    for (size_t i = 0; i < part.length(); ++i) {
+      if (static_cast<uint8_t>(part[i]) < 0x20) {
+        return false;
+      }
+    }
+    if (slash == static_cast<int>(relative.length())) {
+      break;
+    }
+    from = slash + 1;
+  }
+
+  const int basenameAt = relative.lastIndexOf('/') + 1;
+  if (!isWebboardImageAsset(relative.substring(basenameAt))) {
+    return false;
+  }
+  fullPath = "/images/" + relative;
+  return true;
+}
+
+bool ensureLittleFsParentDirs(const String &fullPath) {
+  int from = 1;
+  while (from < static_cast<int>(fullPath.length())) {
+    const int slash = fullPath.indexOf('/', from);
+    if (slash < 0) {
+      break;
+    }
+    const String dir = fullPath.substring(0, slash);
+    if (!LittleFS.exists(dir) && !LittleFS.mkdir(dir)) {
+      return false;
+    }
+    from = slash + 1;
+  }
+  return true;
 }
 } // namespace
 
@@ -1856,9 +1926,10 @@ void handleUpload(AsyncWebServerRequest *request, String filename, size_t index,
     }
   } else {  // "/webboard"
     DBGVB("File: %s, size:%u bytes, index: %u, final: %s\n", filename.c_str(), len, index, final ? "true" : "false");
-    String safeFilename = filename;
-    safeFilename.replace("\\", "/");
-    int slashPos = safeFilename.lastIndexOf('/');
+    String uploadFilename = filename;
+    uploadFilename.replace("\\", "/");
+    String safeFilename = uploadFilename;
+    const int slashPos = safeFilename.lastIndexOf('/');
     if (slashPos >= 0) {
       safeFilename = safeFilename.substring(slashPos + 1);
     }
@@ -1869,8 +1940,13 @@ void handleUpload(AsyncWebServerRequest *request, String filename, size_t index,
       return;
     }
     if (!index) {
-      player.sendCommand({PR_STOP, 0});
+      if (g_webboardUploadRequest != request) {
+        g_webboardUploadRequest = request;
+        g_webboardUploadHadError = false;
+        player.sendCommand({PR_STOP, 0});
+      }
       String spath = "/www/";
+      String targetPath;
       if (!LittleFS.exists("/www")) {
         LittleFS.mkdir("/www");
       }
@@ -1886,16 +1962,20 @@ void handleUpload(AsyncWebServerRequest *request, String filename, size_t index,
         }
       } else if (lowerFilename.endsWith(".png") || lowerFilename.endsWith(".jpg") || lowerFilename.endsWith(".jpeg")
                  || lowerFilename.endsWith(".gif") || lowerFilename.endsWith(".webp") || lowerFilename.endsWith(".bmp")
-                 || lowerFilename.endsWith(".svg") || lowerFilename.endsWith(".ico")) {
-        spath = "/images/";
-        if (!LittleFS.exists("/images")) {
-          LittleFS.mkdir("/images");
+                 || lowerFilename.endsWith(".svg") || lowerFilename.endsWith(".ico") || lowerFilename == "map.csv") {
+        if (!makeWebboardImagePath(uploadFilename, targetPath) || !ensureLittleFsParentDirs(targetPath)) {
+          g_webboardUploadHadError = true;
+          Serial.printf("[WEBBOARD] invalid image path: %s\n", uploadFilename.c_str());
+          return;
         }
       }
-      request->_tempFile = LittleFS.open(spath + safeFilename, "w");
+      if (!targetPath.length()) {
+        targetPath = spath + safeFilename;
+      }
+      request->_tempFile = LittleFS.open(targetPath, "w");
       if (!request->_tempFile) {
         g_webboardUploadHadError = true;
-        Serial.printf("[WEBBOARD] open failed: %s\n", (spath + safeFilename).c_str());
+        Serial.printf("[WEBBOARD] open failed: %s\n", targetPath.c_str());
       }
     }
     if (len && request->_tempFile) {
@@ -1950,6 +2030,7 @@ void handleNotFound(AsyncWebServerRequest *request) {
     return;
   }
   if (request->method() == HTTP_POST && request->url() == "/webboard" && config.emptyFS) {
+    g_webboardUploadRequest = nullptr;
     if (g_webboardUploadHadError) {
       Serial.println("[WEBBOARD] Upload had file write/open error, staying on webboard page");
       g_webboardUploadHadError = false;
@@ -2028,6 +2109,12 @@ void handleNotFound(AsyncWebServerRequest *request) {
 
   if (request->method() == HTTP_POST) {
     if (request->url() == "/webboard") {
+      g_webboardUploadRequest = nullptr;
+      if (g_webboardUploadHadError) {
+        g_webboardUploadHadError = false;
+        request->send(500, "text/plain", "One or more files could not be saved");
+        return;
+      }
       request->redirect("/");
       return;
     }  // <--post files from /data/www

@@ -18,6 +18,7 @@ hr{margin:20px 0;border:0; border-top: #555 1px solid;} p{text-align:center;marg
 .wifi-item{display:flex;justify-content:space-between;gap:10px;padding:6px 8px;border-radius:6px;cursor:pointer;}
 .wifi-item:hover{background: #272727;}
 .wifi-rssi{color: #999;font-size:14px;}
+#folderstatus{color:#999;font-size:14px;min-height:20px;margin-top:8px;}
 input[type=file]{color: #ccc;} input[type=file]::file-selector-button, input[type=submit]{border:2px solid #96c30a;color: #000;padding:6px 16px;border-radius:25px;background-color: #96c30a;margin:0 6px;cursor:pointer;}
 input[type=submit]{font-size:18px;text-transform:uppercase;padding:8px 26px;margin-top:10px;font-family:"Roboto","Helvetica Neue",Arial,sans-serif;font-weight:400;} span{color: #ccc} .flex{display:flex;justify-content: space-around;margin-top:10px;}
 #wupload p{margin:0;} #wupload input[type=submit]{margin-top:0;height:46px;box-sizing:border-box;padding:0 26px;}
@@ -36,7 +37,7 @@ input[type=text],input[type=password]{width:170px;background: #272727;color: #96
 <hr />
 <span>Select <u>ALL</u> files from <i>FusionEdge/data/www/</i><br />and upload them using the form below</span>
 <hr />
-<form action="/webboard" method="post" enctype="multipart/form-data">
+<form id="webboardform" action="/webboard" method="post" enctype="multipart/form-data">
 <p><label for="www">www:</label> <input type="file" name="www" id="www" multiple></p>
 <hr />
 <span>Upload font files (<i>.vlw</i>) to <i>/fonts</i> &mdash; <b>required</b></span>
@@ -44,6 +45,8 @@ input[type=text],input[type=password]{width:170px;background: #272727;color: #96
 <hr />
 <span>-= OPTIONAL =-<br />You can also upload image files<br />to <i>/images</i></span>
 <p><label for="images">images:</label><input type="file" name="images" id="images" accept=".png,.jpg,.jpeg,.gif,.webp,.bmp,.svg,.ico" multiple></p>
+<p><label for="imagesfolder">images folder:</label><input type="file" name="imagesfolder" id="imagesfolder" accept=".png,.jpg,.jpeg,.gif,.webp,.bmp,.svg,.ico,.csv" webkitdirectory directory multiple></p>
+<div id="folderstatus"></div>
 <hr />
 <span>-= OPTIONAL =-<br />You can also upload <i>playlist.csv</i><br />and <i>wifi.csv files</i> from your backup</span>
 <p><label for="data">wifi:</label><input type="file" name="data" id="data" multiple></p>
@@ -133,6 +136,62 @@ if(!connectedMode&&scanBtn&&scanList&&ssidInput){
       scanBtn.disabled=false;
       scanBtn.value='Scan Wi-Fi';
     }
+  });
+}
+const boardForm=document.getElementById('webboardform');
+const imagesFolder=document.getElementById('imagesfolder');
+const folderStatus=document.getElementById('folderstatus');
+if(boardForm&&imagesFolder&&folderStatus){
+  const allowedAsset=(name)=>/\.(png|jpe?g|gif|webp|bmp|svg|ico)$/i.test(name)||/(^|\/)map\.csv$/i.test(name);
+  imagesFolder.addEventListener('change',()=>{
+    const valid=Array.from(imagesFolder.files).filter(file=>allowedAsset(file.webkitRelativePath||file.name));
+    folderStatus.textContent=valid.length?`${valid.length} files selected`:'';
+  });
+  boardForm.addEventListener('submit',(event)=>{
+    if(!imagesFolder.files.length) return;
+    event.preventDefault();
+    const formData=new FormData(boardForm);
+    formData.delete('imagesfolder');
+    let folderFiles=0;
+    Array.from(imagesFolder.files).forEach(file=>{
+      const relativePath=(file.webkitRelativePath||file.name).replace(/\\/g,'/');
+      if(!allowedAsset(relativePath)) return;
+      formData.append('imagesfolder',file,relativePath);
+      folderFiles++;
+    });
+    if(!folderFiles){
+      folderStatus.textContent='No supported image files found';
+      return;
+    }
+
+    const submitButton=boardForm.querySelector('input[type=submit]');
+    if(submitButton) submitButton.disabled=true;
+    const xhr=new XMLHttpRequest();
+    xhr.open('POST','/webboard',true);
+    xhr.timeout=300000;
+    xhr.upload.onprogress=(uploadEvent)=>{
+      if(uploadEvent.lengthComputable){
+        folderStatus.textContent=`Uploading ${Math.round(uploadEvent.loaded*100/uploadEvent.total)}%`;
+      }
+    };
+    xhr.onload=()=>{
+      if(xhr.status>=200&&xhr.status<400){
+        folderStatus.textContent='Upload complete';
+        setTimeout(()=>{window.location.href='/';},1200);
+      }else{
+        folderStatus.textContent='Upload failed: one or more files could not be saved';
+        if(submitButton) submitButton.disabled=false;
+      }
+    };
+    xhr.onerror=()=>{
+      folderStatus.textContent='Upload finished; reconnecting...';
+      setTimeout(()=>{window.location.href='/';},2500);
+    };
+    xhr.ontimeout=()=>{
+      folderStatus.textContent='Upload timed out';
+      if(submitButton) submitButton.disabled=false;
+    };
+    xhr.send(formData);
   });
 }
 </script>
