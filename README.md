@@ -64,7 +64,7 @@ When an ST7796, XPT2046 and SD card share the same SPI bus, some modules may sho
 
 For the Guition JC3248W535 with its integrated AXS15231B QSPI display and touch
 controller, use the tested configuration in
-[AXS15231B_options](AXS15231B_options/README.md).
+[AXS15231B_options](AXS15231B_options/README.md). (by Tibor Botfai)
 
 To add logos for your own stations, see the
 [custom station icon guide](data/images/stations/README.md).
