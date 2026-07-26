@@ -64,7 +64,8 @@ When an ST7796, XPT2046 and SD card share the same SPI bus, some modules may sho
 
 For the Guition JC3248W535 with its integrated AXS15231B QSPI display and touch
 controller, use the tested configuration in
-[AXS15231B_options](AXS15231B_options/README.md). (by Tibor Botfai)
+[AXS15231B_options](AXS15231B_options/README.md). The final AXS15231B driver
+stabilization and hardware testing were completed by Tibor Botfai.
 
 To add logos for your own stations, see the
 [custom station icon guide](data/images/stations/README.md).
@@ -74,6 +75,7 @@ To add logos for your own stations, see the
 - [yoRadio](https://github.com/e2002/yoradio) by e2002 and contributors
 - [VTomRadio](https://github.com/VaraiTamas/VTomRadio/tree/main) LovyanGFX/LittleFS yoRadio variant by VTom
 - [ESP32-audioI2S](https://github.com/schreibfaul1/ESP32-audioI2S) by schreibfaul1
+- Final AXS15231B driver stabilization and hardware testing by Tibor Botfai
 - FusionEdge development by SimZs and contributors
 
 Bundled and external components retain their own copyrights and licenses. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

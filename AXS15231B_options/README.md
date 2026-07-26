@@ -4,6 +4,9 @@ This directory contains a tested `myoptions.h` example for the Guition
 JC3248W535 board with its integrated 480x320 AXS15231B QSPI display and touch
 controller.
 
+The final AXS15231B driver stabilization and long-duration hardware testing
+were completed by Tibor Botfai.
+
 ## How to use it
 
 1. Back up your current project-level `myoptions.h`.
