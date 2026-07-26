@@ -29,6 +29,20 @@
 #endif
 #endif
 
+// Keep continuous full-frame updates within the cadence used by the stable
+// JC3248W535 AXS implementation. This only paces physical panel transfers;
+// framebuffer drawing and UI logic remain unrestricted.
+#ifndef AXS_MIN_FRAME_INTERVAL_MS
+#define AXS_MIN_FRAME_INTERVAL_MS 50
+#endif
+
+// The ESP32-S3 DMA path can very rarely lose/duplicate part of a long QSPI
+// transfer without reporting an error. Keep the AXS panel transfer synchronous
+// while retaining the same staging buffer and QSPI clock.
+#ifndef AXS_FLUSH_USE_DMA
+#define AXS_FLUSH_USE_DMA 0
+#endif
+
 #ifndef AXS_SCAN_BUILD_YIELD_COLS
 #define AXS_SCAN_BUILD_YIELD_COLS 8
 #endif
@@ -42,6 +56,22 @@
 #define AXS_FLUSH_TASK_CORE 0
 #else
 #define AXS_FLUSH_TASK_CORE 1
+#endif
+#endif
+
+#ifndef AXS_FLUSH_CHUNK_DELAY_EVERY
+#if AXS_SMOOTH_SCROLL
+#define AXS_FLUSH_CHUNK_DELAY_EVERY 0
+#else
+#define AXS_FLUSH_CHUNK_DELAY_EVERY 2
+#endif
+#endif
+
+#ifndef AXS_FLUSH_CHUNK_DELAY_MS
+#if AXS_SMOOTH_SCROLL
+#define AXS_FLUSH_CHUNK_DELAY_MS 0
+#else
+#define AXS_FLUSH_CHUNK_DELAY_MS 1
 #endif
 #endif
 
@@ -97,6 +127,14 @@ struct Panel_AXS15231B : public Panel_FrameBufferBase {
         if (!Panel_FrameBufferBase::init(use_reset)) {
             return false;
         }
+
+        // ESP32-S3 enables Panel_FrameBufferBase auto-display for cache
+        // writeback. That would call display() synchronously at the end of
+        // every LovyanGFX primitive, while this panel already owns a locked,
+        // coalescing background flush task. Leaving both paths active causes
+        // a full-frame flush storm under spectrum/VU updates and starves
+        // IDLE0 until the task watchdog resets the device.
+        _auto_display = false;
         _busReady = true;
         _busMutex = xSemaphoreCreateMutex();
         _frameMutex = xSemaphoreCreateRecursiveMutex();
@@ -187,7 +225,9 @@ struct Panel_AXS15231B : public Panel_FrameBufferBase {
             sendScanBuffer();
         }
 
+#if AXS_FLUSH_DIAG
         const bool hadDirtyDuring = _dirtyDuringFlush;
+#endif
         if (_dirtyDuringFlush) {
             markFullDirty();
             _flushRequested = true;
@@ -202,6 +242,7 @@ struct Panel_AXS15231B : public Panel_FrameBufferBase {
             _inBusTransaction = false;
         }
         unlockBus();
+        _lastPhysicalFlushTick = xTaskGetTickCount();
 #if AXS_FLUSH_DIAG
         const uint32_t nowMs = millis();
         const uint32_t flushUs = micros() - diagStartUs;
@@ -381,6 +422,8 @@ private:
         return true;
     }
 
+    // Proven stable JC3248W535 transfer size from VTomRadio: 40 native
+    // 320-pixel rows per DMA staging block.
     static constexpr uint16_t FLUSH_PIXELS = 12800;
     uint8_t** _lineTable = nullptr;
     uint8_t* _framebuffer = nullptr;
@@ -396,6 +439,7 @@ private:
     volatile bool _flushTaskStop = false;
     volatile bool _sleeping = false;
     volatile TickType_t _flushDueTick = 0;
+    volatile TickType_t _lastPhysicalFlushTick = 0;
     uint8_t _stableBootFlushes = AXS_STABLE_BOOT_FLUSHES;
     TaskHandle_t _flushTaskHandle = nullptr;
     SemaphoreHandle_t _busMutex = nullptr;
@@ -495,6 +539,7 @@ private:
     void sendFrameDirect() {
         startQspiMemoryWrite();
         uint_fast16_t outCount = 0;
+        uint8_t chunkCount = 0;
 
         for (int_fast16_t sx = _cfg.memory_width - 1; sx >= 0; --sx) {
             for (uint_fast16_t sy = 0; sy < _cfg.memory_height; ++sy) {
@@ -506,17 +551,28 @@ private:
                 _flushLine[outCount++] = raw;
 
                 if (outCount == FLUSH_PIXELS) {
-                    _bus->writeBytes(reinterpret_cast<const uint8_t*>(_flushLine), FLUSH_PIXELS * sizeof(uint16_t), true, true);
-                    // writeBytes() starts DMA asynchronously. The next loop
-                    // iteration reuses _flushLine, so wait before overwriting it.
+                    _bus->writeBytes(
+                        reinterpret_cast<const uint8_t*>(_flushLine),
+                        FLUSH_PIXELS * sizeof(uint16_t),
+                        true,
+                        AXS_FLUSH_USE_DMA != 0
+                    );
+                    // Do not start overwriting the staging buffer until the
+                    // current QSPI transfer has actually consumed it.
                     _bus->wait();
                     outCount = 0;
+                    yieldAfterFlushChunk(++chunkCount);
                 }
             }
         }
 
         if (outCount) {
-            _bus->writeBytes(reinterpret_cast<const uint8_t*>(_flushLine), outCount * sizeof(uint16_t), true, true);
+            _bus->writeBytes(
+                reinterpret_cast<const uint8_t*>(_flushLine),
+                outCount * sizeof(uint16_t),
+                true,
+                AXS_FLUSH_USE_DMA != 0
+            );
         }
 
         _bus->wait();
@@ -549,6 +605,7 @@ private:
 
         startQspiMemoryWrite();
         const size_t totalPixels = static_cast<size_t>(_cfg.memory_width) * _cfg.memory_height;
+        uint8_t chunkCount = 0;
 
         for (size_t offset = 0; offset < totalPixels; offset += FLUSH_PIXELS) {
             const size_t count = ((totalPixels - offset) > FLUSH_PIXELS) ? FLUSH_PIXELS : (totalPixels - offset);
@@ -561,9 +618,14 @@ private:
                 memcpy(_flushLine, &_scanBuffer[offset], count * sizeof(uint16_t));
             }
 
-            _bus->writeBytes(reinterpret_cast<const uint8_t*>(_flushLine), count * sizeof(uint16_t), true, true);
-            // _flushLine is reused for the next DMA block.
+            _bus->writeBytes(
+                reinterpret_cast<const uint8_t*>(_flushLine),
+                count * sizeof(uint16_t),
+                true,
+                AXS_FLUSH_USE_DMA != 0
+            );
             _bus->wait();
+            yieldAfterFlushChunk(++chunkCount);
         }
 
         _bus->wait();
@@ -617,6 +679,17 @@ private:
                     continue;
                 }
 
+#if AXS_MIN_FRAME_INTERVAL_MS > 0
+                const TickType_t minFrameTicks = pdMS_TO_TICKS(AXS_MIN_FRAME_INTERVAL_MS);
+                if (_lastPhysicalFlushTick != 0 && minFrameTicks > 0) {
+                    const TickType_t elapsed = now - _lastPhysicalFlushTick;
+                    if (elapsed < minFrameTicks) {
+                        vTaskDelay(minFrameTicks - elapsed);
+                        continue;
+                    }
+                }
+#endif
+
                 _flushRequested = false;
                 _dirtyDuringFlush = false;
                 display(0, 0, _width, _height);
@@ -655,6 +728,19 @@ private:
         _bus->writeCommand(0x00, 8);
         _bus->writeCommand(cmd, 8);
         _bus->writeCommand(0x00, 8);
+    }
+
+    void yieldAfterFlushChunk(uint8_t chunkCount) {
+#if AXS_FLUSH_CHUNK_DELAY_EVERY > 0
+        if ((chunkCount % AXS_FLUSH_CHUNK_DELAY_EVERY) == 0) {
+            vTaskDelay(pdMS_TO_TICKS(AXS_FLUSH_CHUNK_DELAY_MS));
+        } else {
+            taskYIELD();
+        }
+#else
+        (void)chunkCount;
+        taskYIELD();
+#endif
     }
 
     void sendCommand(uint8_t cmd) {
@@ -697,6 +783,26 @@ private:
     }
 
     void startQspiMemoryWrite() {
+        // The vendor AXS15231B QSPI driver reissues CASET before every bitmap
+        // transfer (and deliberately omits RASET in QSPI mode). Reasserting
+        // the full 320-pixel scan window here also resets a controller write
+        // pointer that may have slipped by one pixel during a previous frame.
+        const uint16_t scanEnd = _cfg.panel_height - 1;
+        const uint8_t col[] = {
+            0x00,
+            0x00,
+            static_cast<uint8_t>(scanEnd >> 8),
+            static_cast<uint8_t>(scanEnd & 0xFF)
+        };
+
+        cs_control(false);
+        writeQspiCommandPrefix(CMD_CASET);
+        for (size_t i = 0; i < sizeof(col); ++i) {
+            _bus->writeCommand(col[i], 8);
+        }
+        _bus->wait();
+        cs_control(true);
+
         cs_control(false);
         _bus->writeCommand(SEND_PIXELS, 8);
         _bus->writeCommand(0x00, 8);

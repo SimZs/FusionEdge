@@ -1,0 +1,165 @@
+// clang-format off
+/* https://trip5.github.io/ehRadio_myoptions/generator.html
+   https://github.com/VaraiTamas/yoRadio.git
+   Használat előtt olvasd el!!! - Read the before use !!!
+   https://github.com/VaraiTamas/yoRadio/blob/main/README.md !!!
+
+  - A sor elején a // jel inaktívvá teszi a parancsot ezért a fordító nem veszi figyelembe!
+    Ezzel tudod beállítani a te hardveredmek megfelelő összeállítást.
+  - The // sign at the beginning of the line makes the command inactive, so the compiler ignores it!
+    This allows you to set the appropriate configuration for your hardware.
+*/
+
+#pragma once
+
+#ifndef ARDUINO_ESP32S3_DEV
+    #define ARDUINO_ESP32S3_DEV
+#endif
+
+// #define HEAP_DBG
+
+/* Itt tudod beállítani a program nyelvét
+   You can set the program language here.
+   Supported languages: HU NL PL RU EN GR SK DE UA ES. */
+#define LANGUAGE HU
+
+/* -- Névnapok megjelenítése -- Display name days --
+Supported languages: HU, PL, NL, GR, DE (UA Local/namedays/namedays_UA.h is not filled in.) */
+#define NAMEDAYS_FILE HU
+
+#define USE_BUILTIN_LED false /* The RGB LED does not turn on.. */
+
+/* Arduino OTA Support */
+ #define USE_OTA true                    /* Enable OTA updates from Arduino IDE */
+// #define OTA_PASS "myotapassword12345"   /* OTA password for secure updates */
+
+/* HTTP Authentication */
+// #define HTTP_USER ""               /* HTTP basic authentication username */
+// #define HTTP_PASS ""               /* HTTP basic authentication password */
+
+/*----- LCD DISPLAY -----*/
+/* Enable exactly one DSP_MODEL line. */
+#define DSP_MODEL DSP_AXS15231B  // Guition JC3248W535, AXS15231B QSPI
+// #define DSP_MODEL DSP_ILI9488
+// #define DSP_MODEL DSP_ST7796
+// #define DSP_MODEL DSP_DUMMY
+
+/*----- DISPLAY PIN SETS -----*/
+/* Guition JC3248W535 / AXS15231B QSPI */
+#if DSP_MODEL == DSP_AXS15231B
+#define TFT_CS         45
+#define TFT_SCK        47
+#define TFT_D0         21
+#define TFT_D1         48
+#define TFT_D2         40
+#define TFT_D3         39
+#define TFT_RST        -1
+#define BRIGHTNESS_PIN 1
+#define USE_BUILTIN_LED false  // IMPORTANT ! MUST be "false" for JC3248W535 module
+#endif
+
+/* ILI9488 / ST7796 SPI example */
+// #define TFT_DC         9
+// #define TFT_CS         10
+// #define TFT_RST        -1
+// #define BRIGHTNESS_PIN 7
+/*
+   GPIO 11 - MOSI
+   GPIO 12 - CLK
+   GPIO 13 - MISO  // Do not connect to the LCD display unless the display needs it.
+*/
+
+/*----- Touch ISP -----*/
+//#define TS_MODEL TS_MODEL_XPT2046
+//#define TS_CS    3
+
+/*----- Touch I2C -----*/
+//#define TS_MODEL TS_MODEL_FT6X36
+#define TS_MODEL TS_MODEL_AXS15231B
+#define TS_SDA    4
+#define TS_SCL    8
+#define TS_INT    3
+#define TS_RST   -1
+#define TS_AXS15231_FIX
+
+/*----- NEXTION DISPLAY serial port -----*/
+// #define NEXTION_RX			15
+// #define NEXTION_TX			16
+
+/*----- PCM5102A  DAC -----*/
+#define I2S_DOUT 14
+#define I2S_BCLK 9
+#define I2S_LRC  46
+// #define I2S_MCLK 15  /* CS4344 DAC: MCLK pin (PCM5102A-nál nem szükséges / not needed for PCM5102A) */
+//Szabad és MCLK-ra alkalmas jelöltek: GPIO 0, 7, 8, 15, 16, 17, 18, 45, 46
+
+/*----- ENCODER 1 ------*/
+#define ENC_BTNR 15 // S1
+#define ENC_BTNL 16 // S2
+#define ENC_BTNB 7  // KEY
+#define ENC_INTERNALPULLUP	true
+
+/*----- ENCODER 2 -----*/
+// #define ENC2_BTNR 41 // S2
+// #define ENC2_BTNL 40 // S1
+// #define ENC2_BTNB 39 // KEY
+// #define ENC2_INTERNALPULLUP	true
+
+/*----- CLOCK MODUL RTC DS3132 -----*/
+//#define RTC_SCL			     7
+//#define RTC_SDA			     8
+//#define RTC_MODULE DS3231
+
+/*----- REMOTE CONTROL INFRARED RECEIVER -----*/
+/*----- Alvásból ébresztéshez a GPIO 2 -őt kell használni, mert a GPIO 38 nem RTC pin. A PCB-n át kell kötni! -----*/
+/*----- To wake from sleep, you must use GPIO 2, because GPIO 38 is not an RTC pin. It must be connected via the PCB! -----*/
+//#define IR_PIN 2  //38
+//#define IR_NEC_ONLY  // Build only NEC decoder sources from IRremoteESP8266 (faster/smaller build)
+
+/*----- Sleep functions -----*/
+/*----- A WAKE_PIN helyett mostantól két pin állítható be az ébresztéshez: WAKE_PIN1 és WAKE_PIN2 -----*/
+/*----- Így távirányítóval és egy másik gombbal is felébreszthető az eszköz. -----*/
+/*----- Instead of WAKE_PIN, you can now set two pins for wake-up: WAKE_PIN1 and WAKE_PIN2 -----*/
+/*----- This way, you can wake up the device with a remote control and another button. -----*/
+//#define BTN_MODE ENC_BTNB
+//#define WAKE_PIN1 IR_PIN
+// #define WAKE_PIN2 ENC2_BTNB
+
+/*----- SD CARD -----*/
+#define SDC_CS     10
+#define SD_SPI_HOST FSPI   // Guition JC3248W535 SD card: Use FSPI for SD because the AXS15231B QSPI display uses the other SPI host. SD pins from schematic: SCK=12, MISO=13, MOSI=11, CS=10.
+#define SD_SPIPINS 12, 13, 11, SDC_CS  // SCK, MISO, MOSI, CS
+#define SDSPISPEED 4000000 /* 4MHz - safer initial SD speed for JC3248W535 */
+
+/*----- Ezzel a beállítással nincs görgetés az időjárás sávon. -----*/
+/*----- With this setting there is no scrolling on the weather bar. -----*/
+// #define WEATHER_FMT_SHORT
+
+/*----- Ezzel a beállítással a teljes időjárás jelentés megjelenik: pl. 25.8°C • 1026 hPa • 41% RH • 10km/ó [ÉK] -----*/
+/*----- With this setting, the full weather report is displayed. -----*/
+#define EXT_WEATHER  true
+
+/*----- Ezzel a beállítással a szél sebessége km/h lesz. -----*/
+/*----- With this setting, the wind speed will be km/h. -----*/
+#define WIND_SPEED_IN_KMH
+
+/*----- Az itt beállított pin vezérelheti egy audio erősítő tápellátását. Zenelejátszás közben a pin HIGH (magas) állapotban van ami meghúzza az
+erősítő tápellátását kapcsoló relét. Amikor nincs zenelejátszás (STOP vagy a hangerő 0), a pin LOW (alacsony) állapotban van.
+Ez a változás akkor történik, amikor a képernyővédő "while not playing" üzemmódban bekapcsol.
+This pin controls the amplifier's power supply. When music is playing, the pin is set to HIGH to control the relay.
+When music is not playing (stopped or volume is 0), the pin is set to LOW. This change occurs when the screensaver is running. -----*/
+// #define PWR_AMP 2
+
+/*----- Ha ez definiálva van a rádió indításakor, mindig az első csatorna lesz beállítva. -----*/
+/*----- If this is defined at radio startup, the first channel will always be set. -----*/
+//#define ALWAYS_START_FROM_FIRST
+
+/*----- by Zsolt Simon -----*/
+/*----- Tested on Synology NAS ----- */
+// #define USE_DLNA
+// #define dlnaHost "192.168.1.200"
+// #define dlnaIDX  21
+
+//#define POWER_LED 38      // Button LED pin (will be turned on when player is on)
+
+// Serial LittleFS maintenance mode is now controlled in Web UI: Tools > Serial LittleFS maintenance mode

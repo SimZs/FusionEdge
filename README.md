@@ -11,7 +11,7 @@ The project grew from the LovyanGFX/LittleFS-based [VTomRadio](https://github.co
 ## Main target
 
 - ESP32-S3 with PSRAM
-- 480x320 ILI9486, ILI9488 or ST7796 display
+- 480x320 ILI9486, ILI9488, ST7796 or AXS15231B display
 - LovyanGFX display driver
 - XPT2046 resistive or supported I2C capacitive touch controller
 - External I2S DAC or amplifier
@@ -61,6 +61,13 @@ The working bridge parameters are kept in `src/core/bluetooth_config.h`.
 Some ST7796 panels require the **Invert display** WebUI option for correct colors. This is a panel/controller variation and is currently a known hardware-specific setting.
 
 When an ST7796, XPT2046 and SD card share the same SPI bus, some modules may show display artifacts during SD playback. Other tested display/touch combinations do not exhibit this behavior.
+
+For the Guition JC3248W535 with its integrated AXS15231B QSPI display and touch
+controller, use the tested configuration in
+[AXS15231B_options](AXS15231B_options/README.md).
+
+To add logos for your own stations, see the
+[custom station icon guide](data/images/stations/README.md).
 
 ## Project history and credits
 
