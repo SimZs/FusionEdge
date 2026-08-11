@@ -66,9 +66,9 @@ class LGFX_Base : public lgfx::LGFX_Device {
     cfg.pin_io3 = TFT_D3;
     cfg.spi_3wire = false;
 #else
-    cfg.pin_sclk = 12;
-    cfg.pin_mosi = 11;
-    cfg.pin_miso = 13;
+    cfg.pin_sclk = TFT_SCK;
+    cfg.pin_mosi = TFT_MOSI;
+    cfg.pin_miso = TFT_MISO;
     cfg.use_lock = true;  // SPI bus mutex - fehér képernyő megelőzése (v0.1.2 fix)
     cfg.pin_dc = TFT_DC;
 #endif
@@ -85,7 +85,7 @@ class LGFX_Base : public lgfx::LGFX_Device {
     cfg.panel_width = _panelWidth;
     cfg.panel_height = _panelHeight;
     cfg.offset_rotation = _rotationOffset;
-    cfg.invert = true;
+    cfg.invert = LGFX_PANEL_INVERT;
 #if DSP_MODEL == DSP_AXS15231B
     cfg.memory_width = _panelWidth;
     cfg.memory_height = _panelHeight;
@@ -112,12 +112,13 @@ class LGFX_Base : public lgfx::LGFX_Device {
     cfg.i2c_addr = TS_I2C_ADDR;
     cfg.pin_int = (TS_INT == 255) ? -1 : TS_INT;
     cfg.pin_rst = (TS_RST == 255) ? -1 : TS_RST;
+    cfg.freq = LGFX_TOUCH_I2C_FREQ;
     cfg.x_min = 0;
     cfg.x_max = _panelWidth - 1;
     cfg.y_min = 0;
     cfg.y_max = _panelHeight - 1;
     cfg.offset_rotation = _rotationOffset;
-    cfg.bus_shared = true;  // Wire is initialized in config.cpp on the same I2C port
+    cfg.bus_shared = LGFX_TOUCH_BUS_SHARED;
 #elif TS_MODEL == TS_MODEL_AXS15231B
     cfg.pin_sda = TS_SDA;
     cfg.pin_scl = TS_SCL;

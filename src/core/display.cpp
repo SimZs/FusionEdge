@@ -460,6 +460,13 @@ void Display::_buildPager() {
 
 #    endif
     pages[PG_PLAYER]->addWidget(_clock);
+#    ifdef USE_CASSETTE_SCREENSAVER
+    _cassettewidget = new CassetteWidget();
+    _cassettewidget->init({0, 0, 0, WA_LEFT}, config.theme.meta, config.theme.background);
+    _cassettewidget->setTextColors(config.theme.title1, config.theme.title2);
+    _cassettewidget->lock(true);
+    pages[PG_SCREENSAVER]->addWidget(_cassettewidget);
+#    endif
     pages[PG_SCREENSAVER]->addWidget(_clock);
     pages[PG_PLAYER]->addPage(_footer);
     // _metabackground NEM kerül PG_DIALOG-ra (SDCHANGE overlay-nél nem kell a vonal)
@@ -567,6 +574,12 @@ void Display::_refreshThemeColors() {
     if (_meta) { _meta->setColors(config.theme.meta, config.theme.metabg); }
     if (_title1) { _title1->setColors(config.theme.title1, config.theme.background); }
     if (_title2) { _title2->setColors(config.theme.title2, config.theme.background); }
+#    ifdef USE_CASSETTE_SCREENSAVER
+    if (_cassettewidget) {
+        _cassettewidget->setColors(config.theme.meta, config.theme.background);
+        _cassettewidget->setTextColors(config.theme.title1, config.theme.title2);
+    }
+#    endif
     if (_metabackground) { _metabackground->setColors(config.theme.metafill, config.theme.metafill); }
     if (_weather) { _weather->setColors(config.theme.weather, config.theme.background); }
     if (_nums) { _nums->setColors(config.theme.digit, config.theme.background); }
@@ -605,6 +618,12 @@ void Display::_swichMode(displayMode_e newmode) {
     _mode = newmode;
     dsp.setScrollId(NULL);
     if (newmode == PLAYER) {
+#    ifdef USE_CASSETTE_SCREENSAVER
+        if (prevMode == SCREENSAVER || prevMode == SCREENBLANK) {
+            if (_cassettewidget) { _cassettewidget->lock(true); }
+            if (_clock) { _clock->unlock(); }
+        }
+#    endif
         if (prevMode == NUMBERS) {
             purgeQueuedRequestType(NEXTSTATION);
             purgeQueuedRequestType(NEWTITLE); // Clear stale title updates to avoid delayed metadata display
@@ -662,12 +681,26 @@ void Display::_swichMode(displayMode_e newmode) {
     if (newmode == SCREENSAVER || newmode == SCREENBLANK) {
         eqForceClose();
         config.isScreensaver = true;
+#    ifdef USE_CASSETTE_SCREENSAVER
+        const bool showCassette = newmode == SCREENSAVER && player.isRunning();
+        if (_cassettewidget) { _cassettewidget->lock(!showCassette); }
+        if (_clock) {
+            if (newmode == SCREENSAVER && !showCassette) {
+                _clock->setZoom(2.0f);
+                _clock->unlock();
+            } else {
+                _clock->lock(true);
+            }
+        }
+#    else
+        if (newmode == SCREENSAVER) { _clock->setZoom(2.0f); }
+#    endif
         _pager->setPage(pages[PG_SCREENSAVER]);
         if (newmode == SCREENBLANK) {
+#    ifndef USE_CASSETTE_SCREENSAVER
             _clock->clear();
+#    endif
             config.setDspOn(false, false);
-        } else {
-            _clock->setZoom(2.0f);  // Nagy óra screensaverben
         }
     } else {
         config.screensaverTicks = SCREENSAVERSTARTUPDELAY;
@@ -822,10 +855,11 @@ void Display::putRequest(displayRequestType_e type, int payload) {
 
 void Display::_layoutChange(bool played) {
     if (!_spectrum) { return; }
+    spectrumAnalyzer.resetSmooth();
+    if (_mode != PLAYER) { return; }
     if (config.store.vumeter) {
-        spectrumAnalyzer.resetSmooth();
         if (played) {
-            _spectrum->lock(displayContentChanging || _mode != PLAYER);
+            _spectrum->lock(displayContentChanging);
         } else {
             _spectrum->reset();
         }
@@ -834,15 +868,13 @@ void Display::_layoutChange(bool played) {
         // playback start. reset() clears the full spectrum rectangle and would
         // make a "spectrum disabled" A/B test dirty.
         _spectrum->lock(true);
-        spectrumAnalyzer.resetSmooth();
     }
 }
 
 void Display::applyVuModeChange() {
-    if (_spectrum) {
-        spectrumAnalyzer.resetSmooth();
-        _spectrum->reset();
-    }
+    spectrumAnalyzer.resetSmooth();
+    if (_mode != PLAYER) { return; }
+    if (_spectrum) { _spectrum->reset(); }
     _layoutChange(player.isRunning());
 }
 void Display::invalidateThemeWidgets() {
@@ -1019,6 +1051,10 @@ void Display::loop() {
                     break;
 
                 case SHOWVUMETER:
+                    if (_mode != PLAYER) {
+                        spectrumAnalyzer.resetSmooth();
+                        break;
+                    }
                     if (_spectrum) {
                         if (config.store.vumeter) {
                             _spectrum->lock(false);

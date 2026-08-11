@@ -1,41 +1,47 @@
 #ifndef dsp_full_loc
 #define dsp_full_loc
+
 #include <pgmspace.h>
 #include "../myoptions.h"
+
 // clang-format off
-const char mon[] PROGMEM = "mo";
-const char tue[] PROGMEM = "tu";
-const char wed[] PROGMEM = "we";
-const char thu[] PROGMEM = "th";
-const char fri[] PROGMEM = "fr";
-const char sat[] PROGMEM = "sa";
-const char sun[] PROGMEM = "su";
 
-const char monf[] PROGMEM = "monday";
-const char tuef[] PROGMEM = "tuesday";
-const char wedf[] PROGMEM = "wednesday";
-const char thuf[] PROGMEM = "thursday";
-const char frif[] PROGMEM = "friday";
-const char satf[] PROGMEM = "saturday";
-const char sunf[] PROGMEM = "sunday";
+// ============================================================
+// DAYS
+// ============================================================
+const char mon[] PROGMEM = "Mo";
+const char tue[] PROGMEM = "Tu";
+const char wed[] PROGMEM = "We";
+const char thu[] PROGMEM = "Th";
+const char fri[] PROGMEM = "Fr";
+const char sat[] PROGMEM = "Sa";
+const char sun[] PROGMEM = "Su";
 
-const char jan[] PROGMEM = "january";
-const char feb[] PROGMEM = "february";
-const char mar[] PROGMEM = "march";
-const char apr[] PROGMEM = "april";
-const char may[] PROGMEM = "may";
-const char jun[] PROGMEM = "june";
-const char jul[] PROGMEM = "july";
-const char aug[] PROGMEM = "august";
-const char sep[] PROGMEM = "september";
-const char octt[] PROGMEM = "october";
-const char nov[] PROGMEM = "november";
-const char decc[] PROGMEM = "december";
+const char monf[] PROGMEM = "Monday";
+const char tuef[] PROGMEM = "Tuesday";
+const char wedf[] PROGMEM = "Wednesday";
+const char thuf[] PROGMEM = "Thursday";
+const char frif[] PROGMEM = "Friday";
+const char satf[] PROGMEM = "Saturday";
+const char sunf[] PROGMEM = "Sunday";
 
+const char jan[] PROGMEM = "January";
+const char feb[] PROGMEM = "February";
+const char mar[] PROGMEM = "March";
+const char apr[] PROGMEM = "April";
+const char may[] PROGMEM = "May";
+const char jun[] PROGMEM = "June";
+const char jul[] PROGMEM = "July";
+const char aug[] PROGMEM = "August";
+const char sep[] PROGMEM = "September";
+const char octt[] PROGMEM = "October";
+const char nov[] PROGMEM = "November";
+const char decc[] PROGMEM = "December";
 
-const char* const dow[]     PROGMEM = { sun, mon, tue, wed, thu, fri, sat };
-const char* const dowf[]    PROGMEM = { sunf, monf, tuef, wedf, thuf, frif, satf };
-const char* const mnths[]   PROGMEM = { jan, feb, mar, apr, may, jun, jul, aug, sep, octt, nov, decc };
+const char* const dow[]   PROGMEM = { sun, mon, tue, wed, thu, fri, sat };
+const char* const dowf[]  PROGMEM = { sunf, monf, tuef, wedf, thuf, frif, satf };
+const char* const mnths[] PROGMEM = { jan, feb, mar, apr, may, jun, jul, aug, sep, octt, nov, decc };
+
 // ============================================================
 // WIND DIRECTIONS - SHORT
 // ============================================================
@@ -94,50 +100,77 @@ static inline const char *const *getWindTable() {
   return config.store.shortWeather ? wind_short : wind_long;
 }
 
-const char    const_PlReady[]    PROGMEM = "[ready]";
-const char  const_PlStopped[]    PROGMEM = "[stopped]";
-const char  const_PlConnect[]    PROGMEM = "[connecting]";
-const char  const_DlgVolume[]    PROGMEM = "VOLUME";
-const char    const_DlgLost[]    PROGMEM = "* LOST *";
-const char  const_DlgUpdate[]    PROGMEM = "* UPDATING *";
-const char const_DlgNextion[]    PROGMEM = "* NEXTION *";
-const char const_getWeather[]    PROGMEM = "";
-const char  const_waitForSD[]    PROGMEM = "INDEX SD";
+// ============================================================
+// PLAYER / DIALOG TEXT
+// ============================================================
+const char const_PlReady[]    PROGMEM = "[ready]";
+const char const_PlStopped[]  PROGMEM = "[stopped]";
+const char const_PlConnect[]  PROGMEM = "[connecting]";
+const char const_DlgVolume[]  PROGMEM = "VOLUME";
+const char const_DlgLost[]    PROGMEM = "* LOST *";
+const char const_DlgUpdate[]  PROGMEM = "* UPDATING *";
+const char const_DlgNextion[] PROGMEM = "* NEXTION *";
+const char const_getWeather[] PROGMEM = "";
+const char const_waitForSD[]  PROGMEM = "INDEX SD";
 
-const char        apNameTxt[]    PROGMEM = "AP NAME";
-const char        apPassTxt[]    PROGMEM = "PASSWORD";
-const char       bootstrFmt[]    PROGMEM = "Trying to %s";
-const char        apSettFmt[]    PROGMEM = "SETTINGS PAGE ON: HTTP://%s/";
+const char apNameTxt[]   PROGMEM = "AP NAME";
+const char apPassTxt[]   PROGMEM = "PASSWORD";
+const char bootstrFmt[]  PROGMEM = "Trying to %s";
+const char apSettFmt[]   PROGMEM = "SETTINGS PAGE ON: HTTP://%s/";
+
 // ============================================================
 // WEATHER FORMAT STRINGS
 // ============================================================
+#ifdef IMPERIALUNIT
+const char weatherFmtShort[] PROGMEM =
+  "%.2f inHg · %d%% RH · %.1f mph [%s]";
+#else
 const char weatherFmtShort[] PROGMEM =
   "%d hPa · %d%% RH · %.1f km/h [%s]";
+#endif
 
 #if EXT_WEATHER
-const char weatherFmtLong[] PROGMEM =
-  "%s, %.1f°C · feels like: %.1f°C · pressure: %d hPa · humidity: %d%% · wind: %.1f km/h [%s]";
+  #ifdef IMPERIALUNIT
+  const char weatherFmtLong[] PROGMEM =
+    "%s, %.1f°F · feels like: %.1f°F · pressure: %.2f inHg · humidity: %d%% · wind: %.1f mph [%s]";
+  #else
+  const char weatherFmtLong[] PROGMEM =
+    "%s, %.1f°C · feels like: %.1f°C · pressure: %d hPa · humidity: %d%% · wind: %.1f km/h [%s]";
+  #endif
 #else
-const char weatherFmtLong[] PROGMEM =
-  "%s, %.1f°C · pressure: %d hPa · humidity: %d%%";
+  #ifdef IMPERIALUNIT
+  const char weatherFmtLong[] PROGMEM =
+    "%s, %.1f°F · pressure: %.2f inHg · humidity: %d%%";
+  #else
+  const char weatherFmtLong[] PROGMEM =
+    "%s, %.1f°C · pressure: %d hPa · humidity: %d%%";
+  #endif
 #endif
 
 static inline const char* getWeatherFmt() {
   return config.store.shortWeather ? weatherFmtShort : weatherFmtLong;
 }
 
-const char weatherUnits[] PROGMEM = "metric"; /* standard, metric, imperial */
-const char weatherLang[]  PROGMEM = "en";
+#ifdef IMPERIALUNIT
+const char weatherUnits[] PROGMEM = "imperial";
+#else
+const char weatherUnits[] PROGMEM = "metric";
+#endif
 
+const char weatherLang[] PROGMEM = "en";
+
+// ============================================================
+// PRESET TEXT
+// ============================================================
 const char prstAssigned[]     PROGMEM = "Assigned";
 const char prstDeleted[]      PROGMEM = "Preset deleted";
 const char prstNoUrl[]        PROGMEM = "No URL";
 const char prstEmptyPreset[]  PROGMEM = "Empty preset";
-const char prstPlay[] PROGMEM = "Play";
-const char prstSave[] PROGMEM = "Save";
-const char prstDel[]  PROGMEM = "Delete";
-const char prstSpace[]  PROGMEM = "Space";
-const char prstCancel[] PROGMEM = "Cancel";
-const char prstOk[]     PROGMEM = "OK";
+const char prstPlay[]         PROGMEM = "Play";
+const char prstSave[]         PROGMEM = "Save";
+const char prstDel[]          PROGMEM = "Delete";
+const char prstSpace[]        PROGMEM = "Space";
+const char prstCancel[]       PROGMEM = "Cancel";
+const char prstOk[]           PROGMEM = "OK";
 
-#endif
+#endif // dsp_full_loc

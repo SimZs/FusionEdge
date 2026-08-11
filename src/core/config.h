@@ -42,7 +42,7 @@
 #    define ESP_ARDUINO_3 1
 #endif
 
-#define CONFIG_VERSION 7
+#define CONFIG_VERSION 8
 #define VOLCURVE_PATH "/data/volcurve.csv"
 
 enum playMode_e : uint8_t { // DLNA mod

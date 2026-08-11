@@ -318,11 +318,16 @@ void Config::_setupVersion() {
             saveValue(&store.lsCount,      (uint8_t)24);
             break;
         case 6: saveValue(&store.autoEqEnabled, false); break;
-        case 7: /* Auto On-Off Timer fields */
+        case 7: { /* Auto On-Off Timer fields + screensaver timeout unit migration */
             strlcpy(store.autoStartTime, "", sizeof(store.autoStartTime));
             strlcpy(store.autoStopTime,  "", sizeof(store.autoStopTime));
+            const uint32_t timeoutSeconds = (uint32_t)store.screensaverPlayingTimeout * 60U;
+            store.screensaverPlayingTimeout = timeoutSeconds < 5U
+                                                   ? 5U
+                                                   : timeoutSeconds > 65520U ? 65520U : (uint16_t)timeoutSeconds;
             eepromWrite(EEPROM_START, store);
             break;
+        }
     }
     currentVersion++;
     saveValue(&store.version, currentVersion);
@@ -1280,7 +1285,7 @@ void Config::setScreensaverPlayingEnabled(bool val) {
     display.putRequest(NEWMODE, PLAYER);
 }
 void Config::setScreensaverPlayingTimeout(uint16_t val) {
-    val = constrain(val, 1, 1080);
+    val = constrain(val, 5, 65520);
     config.saveValue(&config.store.screensaverPlayingTimeout, val);
     display.putRequest(NEWMODE, PLAYER);
 }
@@ -1389,7 +1394,7 @@ void Config::resetSystem(const char* val, uint8_t clientId) {
         saveValue(&store.screensaverTimeout, (uint16_t)20);
         saveValue(&store.screensaverBlank, false);
         saveValue(&store.screensaverPlayingEnabled, false);
-        saveValue(&store.screensaverPlayingTimeout, (uint16_t)5);
+        saveValue(&store.screensaverPlayingTimeout, (uint16_t)300);
         saveValue(&store.screensaverPlayingBlank, false);
         saveValue(&store.fadeEnabled, (uint8_t)FADE_ENABLED, true);
         saveValue(&store.fadeStartDelay, (uint16_t)FADE_START_DELAY, true);
@@ -1507,7 +1512,7 @@ void Config::setDefaults() {
     store.encodersIndependent = false;
     store.autoEqEnabled = false; // FusionEdge: Auto EQ alapból kikapcsolva
     store.screensaverPlayingEnabled = false;
-    store.screensaverPlayingTimeout = 5;
+    store.screensaverPlayingTimeout = 300;
     store.screensaverPlayingBlank = false;
     // store.abuff = VS1053_CS == 255 ? 7 : 10;
     store.watchdog = true;

@@ -197,6 +197,8 @@ void BluetoothPlayer::clearMeta() {
     _trackNum   = 0;
     _trackTotal = 0;
     _trackMs    = 0;
+    _streamCodec[0] = '\0';
+    _streamBits = 0;
 }
 
 void BluetoothPlayer::setFallbackTitle(const char* title) {
@@ -265,8 +267,16 @@ void BluetoothPlayer::parseLine(char* line) {
         return;
     }
 
-    if (!strncmp(line, "+Code1=", 7) || !strncmp(line, "+CODE=", 6) ||
-        !strncmp(line, "+ABIT=", 6)) {
+    if (!strncmp(line, "+Code1=", 7) || !strncmp(line, "+CODE=", 6)) {
+        const char* value = strchr(line, '=');
+        if (value && value[1]) { strlcpy(_streamCodec, value + 1, sizeof(_streamCodec)); }
+        log_i("##[BT]# stream info: %s", line);
+        return;
+    }
+
+    if (!strncmp(line, "+ABIT=", 6)) {
+        const uint32_t bits = parseUnsignedValue(line);
+        if (bits >= 8U && bits <= 32U) { _streamBits = (uint8_t)bits; }
         log_i("##[BT]# stream info: %s", line);
         return;
     }

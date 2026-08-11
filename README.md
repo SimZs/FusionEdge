@@ -56,6 +56,37 @@ The tested Bluetooth path uses a QCC5124EL module:
 
 The working bridge parameters are kept in `src/core/bluetooth_config.h`.
 
+## Weather units
+
+Weather values use metric units by default: Celsius, hPa and km/h. To display
+Fahrenheit, inHg and mph, select `LANGUAGE EN` and define `IMPERIALUNIT` in
+`myoptions.h`. A build-time check prevents this option from being combined
+with locale files that currently contain metric-only weather format strings.
+
+The `IMPERIALUNIT` weather-unit option was reintroduced by Adam Navrowski.
+
+## Cassette screensaver
+
+Define `USE_CASSETTE_SCREENSAVER` in `myoptions.h` to enable the animated
+vintage cassette. In the WebUI, enable the **While playing** screensaver, set
+its timeout in seconds, and leave its **Blank screen** option disabled. During
+playback the cassette shows the current artist and track title; without stream
+metadata it falls back to the station name and a `PLAYING` label. The lower
+label displays the available codec, bitrate, sample-rate and bit-depth
+information. The normal idle screensaver remains the large clock, while
+**Blank screen** continues to switch the display off.
+
+The cassette idea and original animation prototype were contributed by Adam
+Navrowski. The FusionEdge implementation redraws only the two reel areas during
+animation to keep display traffic low. The supplied background is stored at
+`/images/screensaver/retro_audio_cassette.png`; `CASSETTE_PNG_PATH` can point
+to a replacement image with the same 456 x 291 pixel layout. Blue/pink and
+red/cream alternatives are supplied as `retro_audio_cassette_blue.png` and
+`retro_audio_cassette_red.png` in the same directory.
+`CASSETTE_FRAME_MS` can optionally set the reel refresh interval; the default
+is 100 ms. If the PNG or its PSRAM-backed sprite cannot be loaded, FusionEdge
+falls back to the code-drawn cassette.
+
 ## Display note
 
 Some ST7796 panels require the **Invert display** WebUI option for correct colors. This is a panel/controller variation and is currently a known hardware-specific setting.
@@ -67,6 +98,12 @@ controller, use the tested configuration in
 [AXS15231B_options](AXS15231B_options/README.md). The final AXS15231B driver
 stabilization and hardware testing were completed by Tibor Botfai.
 
+For the 4D Systems gen4-ESP32-35CT with its integrated ILI9488 display,
+FocalTech capacitive touch controller and microSD slot, use the configuration
+in [gen4-ESP32-35CT_options](gen4-ESP32-35CT_options/README.md). It uses the
+same ILI9488 driver as regular SPI modules, with board-specific pins and bus
+settings supplied through `myoptions.h`.
+
 To add logos for your own stations, see the
 [custom station icon guide](data/images/stations/README.md).
 
@@ -76,6 +113,9 @@ To add logos for your own stations, see the
 - [VTomRadio](https://github.com/VaraiTamas/VTomRadio/tree/main) LovyanGFX/LittleFS yoRadio variant by VTom
 - [ESP32-audioI2S](https://github.com/schreibfaul1/ESP32-audioI2S) by schreibfaul1
 - Final AXS15231B driver stabilization and hardware testing by Tibor Botfai
+- 4D Systems gen4-ESP32-35CT board support by Révész Tamás
+- Reintroduction of `IMPERIALUNIT` weather-unit support by Adam Navrowski
+- Cassette screensaver concept and original prototype by Adam Navrowski
 - FusionEdge development by SimZs and contributors
 
 Bundled and external components retain their own copyrights and licenses. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

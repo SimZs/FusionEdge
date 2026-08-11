@@ -105,7 +105,7 @@ void WeatherIconWidget::setWeather(const char* code, float tempC) {
         _loadPng(code);
     }
 #ifdef IMPERIALUNIT
-    snprintf(_temp, sizeof(_temp), "%.0f \xC2\xB0" "F", tempC * 9.0f / 5.0f + 32.0f);
+    snprintf(_temp, sizeof(_temp), "%.0f \xC2\xB0" "F", tempC);
 #else
     snprintf(_temp, sizeof(_temp), "%.0f \xC2\xB0" "C", tempC);
 #endif
@@ -115,7 +115,7 @@ void WeatherIconWidget::setWeather(const char* code, float tempC) {
 
 void WeatherIconWidget::setTemp(float tempC) {
 #ifdef IMPERIALUNIT
-    snprintf(_temp, sizeof(_temp), "%.0f °F", tempC * 9.0f / 5.0f + 32.0f);
+    snprintf(_temp, sizeof(_temp), "%.0f °F", tempC);
 #else
     snprintf(_temp, sizeof(_temp), "%.0f °C", tempC);
 #endif

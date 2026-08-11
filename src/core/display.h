@@ -27,6 +27,7 @@ class StationIconWidget;
 class DateWidget;
 class StatusWidget;
 class EqWidget;
+class CassetteWidget;
 
 class Display {
   public:
@@ -112,6 +113,9 @@ class Display {
     DateWidget*     _datewidget;
     StatusWidget*   _statuswidget;
     EqWidget*       _eqwidget;
+#    ifdef USE_CASSETTE_SCREENSAVER
+    CassetteWidget* _cassettewidget = nullptr;
+#    endif
 
     bool     _locked = false;
     bool     _panelAwake = true;

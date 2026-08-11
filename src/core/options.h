@@ -2,7 +2,7 @@
 #define options_h
 #pragma once
 
-#define FW_VERSION "1.0.2"
+#define FW_VERSION "1.0.3"
 
 #ifndef THEME_CSV_VERSION
 #    define THEME_CSV_VERSION "0.0.1"
@@ -92,7 +92,7 @@ STORE YOUR SETTINGS IN THE *** myoptions.h *** FILE.
 #endif
 
 #ifndef LGFX_LCD_SPI_HOST
-  #define LGFX_LCD_SPI_HOST     2  // 1=HSPI, 2=VSPI (ESP32 only)
+  #define LGFX_LCD_SPI_HOST     2  // ESP32-S3: 1=SPI2_HOST, 2=SPI3_HOST
 #endif
 
 #ifndef TFT_DC
@@ -103,6 +103,24 @@ STORE YOUR SETTINGS IN THE *** myoptions.h *** FILE.
 #endif
 #ifndef TFT_RST
   #define TFT_RST       -1   // Or set to -1 and connect to Esp EN pin
+#endif
+#ifndef TFT_SCK
+  #define TFT_SCK       12
+#endif
+#ifndef TFT_MOSI
+  #define TFT_MOSI      11
+#endif
+#ifndef TFT_MISO
+  #define TFT_MISO      13
+#endif
+#ifndef LGFX_PANEL_INVERT
+  #define LGFX_PANEL_INVERT true
+#endif
+#ifndef LGFX_TOUCH_BUS_SHARED
+  #define LGFX_TOUCH_BUS_SHARED true
+#endif
+#ifndef LGFX_TOUCH_I2C_FREQ
+  #define LGFX_TOUCH_I2C_FREQ 400000
 #endif
 
 /*        NEXTION                 */

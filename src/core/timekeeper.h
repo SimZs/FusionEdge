@@ -10,7 +10,7 @@ class TimeKeeper {
     volatile bool busy;
     char *weatherBuf;
     char  weatherIcon[8]; // OpenWeatherMap icon kód pl. "01d"
-    float tempC;          // Hőmérséklet Celsius-ban
+    float tempC;          // Temperature in the active OpenWeatherMap unit system
   public:
     TimeKeeper();
     bool loop0();

@@ -47,6 +47,9 @@ class BluetoothPlayer {
     uint8_t    trackTotal() const { return _trackTotal; }
     uint32_t   trackMs()    const { return _trackMs; }
     uint32_t   posMs()      const { return _posMs; }
+    const char* streamCodec() const { return _streamCodec; }
+    uint32_t   streamSampleRate() const { return _bridgeSampleRate ? _bridgeSampleRate : _requestedSampleRate; }
+    uint8_t    streamBits() const { return _streamBits; }
 
     // --- I2S RX bridge ---
     bool startBridge();
@@ -82,6 +85,8 @@ class BluetoothPlayer {
     bool      _metaUpdated = false; // igaz, ha a loop()-ban új +TITL/ARTS érkezett
     bool      _streamInfoRequested = false;
     uint32_t  _lastStreamInfoRequestMs = 0;
+    char      _streamCodec[16] = {};
+    uint8_t   _streamBits = 0;
 
     i2s_chan_handle_t _rxHandle          = nullptr;
     TaskHandle_t      _bridgeTaskHandle  = nullptr;

@@ -375,7 +375,7 @@ void TimeKeeper::_upScreensaver() {
     }
     if (config.store.screensaverPlayingEnabled && display.mode() == PLAYER && player.isRunning()) {
         config.screensaverPlayingTicks++;
-        if (config.screensaverPlayingTicks > config.store.screensaverPlayingTimeout * 60 + SCREENSAVERSTARTUPDELAY) {
+        if (config.screensaverPlayingTicks > config.store.screensaverPlayingTimeout + SCREENSAVERSTARTUPDELAY) {
             if (config.store.screensaverPlayingBlank) {
                 display.putRequest(NEWMODE, SCREENBLANK);
             } else {
@@ -589,15 +589,18 @@ bool _getWeather() {
                             Serial.println("##WEATHER###: wind deg not found !");
                             result = false;
                         }
-// press = press / 1.333;
-// press = press / 0.973; //Módosítva hPa kijelzéshez. "weather"
-#    ifdef WIND_SPEED_IN_KMH
-                        wind_speed *= 3.6f;
-#    endif
 
                         if (!result) { return; }
-                        uint8_t wind_idx = (uint8_t)(((float)(wind_deg % 360) + 11.25f) / 22.5f);
-                        if (wind_idx > 15) { wind_idx = 0; }
+
+                        const float press_corr = (float)press;
+#    ifdef IMPERIALUNIT
+                        const float press_inHg = press_corr * 0.02953f;
+                        // OpenWeatherMap already returns mph when units=imperial.
+                        const float wind_mph = wind_speed;
+#    else
+                        const int   press_hPa = (int)lroundf(press_corr);
+                        const float wind_km = wind_speed * 3.6f;
+#    endif
 
 #    ifdef USE_NEXTION
                         nextion.putcmdf("press_txt.txt=\"%dmm\"", press);
@@ -630,27 +633,79 @@ bool _getWeather() {
                         nextion.weatherVisible(1);
 #    endif
 
-                        Serial.printf("##WEATHER###: description: %s, temp:%.1f C, pressure:%dmmHg, humidity:%d%%, wind: %d\n", desc, tempf, press, hum, wind_idx);
-                        // Szélirány string (short/long az aktuális mód szerint)
+                        Serial.printf("##WEATHER###: description:%s temp:%.1f pressure:%d hPa humidity:%d%% wind:%.1f deg:%d\n",
+                                      desc, tempf, press, hum, wind_speed, wind_deg);
+                        uint8_t wind_idx = (uint8_t)(((float)(wind_deg % 360) + 11.25f) / 22.5f);
+                        if (wind_idx > 15) { wind_idx = 0; }
+
                         PGM_P wdirP = (const char*)pgm_read_ptr(&LANG::getWindTable()[wind_idx]);
 
-                        if (config.store.shortWeather) {
-                            // SHORT: hPa · RH · km/h [irány]
-                            sprintf_P(timekeeper.weatherBuf, (PGM_P)LANG::getWeatherFmt(),
-                                press, hum, wind_speed, wdirP);
-                        } else {
-                            // LONG: leírás, hőmérséklet, hőérzet (EXT_WEATHER), nyomás, páratartalom, szél, irány
-#    if EXT_WEATHER
-                            sprintf_P(timekeeper.weatherBuf, (PGM_P)LANG::getWeatherFmt(),
-                                desc, tempf, tempfl, press, hum, wind_speed, wdirP);
-#    else
-                            sprintf_P(timekeeper.weatherBuf, (PGM_P)LANG::getWeatherFmt(),
-                                desc, tempf, press, hum);
-#    endif
-                        }
-                        display.putRequest(NEWWEATHER);
-                    } else {
-                        Serial.println("##WEATHER###: weather not found !");
+            if (config.store.shortWeather) {
+
+              // SHORT:
+              // "%d hPa \007 %d%% RH \007 %.1f km/h [%s]"
+              snprintf_P(
+                timekeeper.weatherBuf,
+                WEATHER_STRING_L,
+                (PGM_P)LANG::getWeatherFmt(),
+              #ifdef IMPERIALUNIT
+                press_inHg,     // float
+              #else
+                press_hPa,      // int
+              #endif
+                hum,
+              #ifdef IMPERIALUNIT
+                wind_mph,
+              #else
+                wind_km,
+              #endif
+                wdirP
+              );
+
+            } else {
+
+              // LONG:
+            #if EXT_WEATHER
+              snprintf_P(
+                timekeeper.weatherBuf,
+                WEATHER_STRING_L,
+                (PGM_P)LANG::getWeatherFmt(),
+                desc,
+                tempf,
+                tempfl,
+              #ifdef IMPERIALUNIT
+                press_inHg,     // float
+              #else
+                press_hPa,      // int
+              #endif
+                hum,
+              #ifdef IMPERIALUNIT
+                wind_mph,
+              #else
+                wind_km,
+              #endif
+                wdirP
+              );
+            #else
+              snprintf_P(
+                timekeeper.weatherBuf,
+                WEATHER_STRING_L,
+                (PGM_P)LANG::getWeatherFmt(),
+               desc,
+                tempf,
+              #ifdef IMPERIALUNIT
+                press_inHg,     // float
+              #else
+                press_hPa,      // int
+              #endif
+                hum
+              );
+            #endif
+            }
+
+            display.putRequest(NEWWEATHER);
+          } else {
+            Serial.println("##WEATHER###: weather not found !");
                     }
                 },
                 NULL); // <-- client->onData
