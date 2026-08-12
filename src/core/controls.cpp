@@ -46,6 +46,13 @@ static inline void registerUserActivity() {
 #endif
 }
 
+static inline bool wakeDisplayFromScreensaver() {
+    if (display.mode() != SCREENSAVER && display.mode() != SCREENBLANK) return false;
+    registerUserActivity();
+    display.putRequest(NEWMODE, PLAYER);
+    return true;
+}
+
 static inline bool hasPrimaryEncoder() {
     return ENC_BTNL != 255 && ENC_BTNR != 255;
 }
@@ -212,6 +219,7 @@ void encodersLoop(myEncoder* enc, bool first) {
     if (display.mode() == LOST) { return; }
     int8_t delta = enc->encoderChanged();
     if (delta == 0) { return; }
+    if (wakeDisplayFromScreensaver()) { return; }
 #    if defined(DUMMYDISPLAY) && !defined(USE_NEXTION)
     // ===== Dummy display =====
     uint8_t btnState = digitalRead(first ? ENC_BTNB : ENC2_BTNB);
@@ -562,6 +570,7 @@ void irLoop() {
 #endif // if IR_PIN!=255
 
 void onBtnLongPressStart(int id) {
+    if (wakeDisplayFromScreensaver()) return;
     switch ((controlEvt_e)id) {
         case EVT_BTNLEFT:
         case EVT_BTNRIGHT:
@@ -645,6 +654,7 @@ void onBtnDuringLongPress(int id) {
 }
 
 void controlsEvent(bool toRight, int8_t volDelta) {
+    if (wakeDisplayFromScreensaver()) return;
     // MODESELECT módban az enkóder görget a módok között
     if (display.mode() == MODESELECT) {
         display.modeSelectorScroll(toRight ? 1 : -1);
@@ -682,6 +692,7 @@ void controlsEvent(bool toRight, int8_t volDelta) {
 void onBtnClick(int id) {
     bool         passBnCenter = (controlEvt_e)id == EVT_BTNCENTER || (controlEvt_e)id == EVT_ENCBTNB || (controlEvt_e)id == EVT_ENC2BTNB;
     controlEvt_e btnid = static_cast<controlEvt_e>(id);
+    if (wakeDisplayFromScreensaver()) return;
     pm.on_btn_click(btnid);
     if (network.status != CONNECTED && network.status != SDREADY && (controlEvt_e)id != EVT_BTNMODE && !passBnCenter) return;
     registerUserActivity();
@@ -757,10 +768,7 @@ void onBtnClick(int id) {
 }
 
 void onBtnDoubleClick(int id) {
-    if (display.mode() == SCREENSAVER || display.mode() == SCREENBLANK) {
-        display.putRequest(NEWMODE, PLAYER);
-        return;
-    }
+    if (wakeDisplayFromScreensaver()) return;
     switch ((controlEvt_e)id) {
         case EVT_BTNLEFT: {
             if (display.mode() != PLAYER) return;

@@ -553,7 +553,7 @@ void CassetteWidget::_drawReels() {
     const float transfer = (sinf((float)_phase * 0.0174532925f) + 1.0f) * 0.5f;
     const int16_t leftRadius = 37 - (int16_t)(transfer * 10.0f);
     const int16_t rightRadius = 27 + (int16_t)(transfer * 10.0f);
-    const float angle = (float)_phase * 0.104719755f;
+    const float angle = -(float)_phase * 0.104719755f;
     _drawReel(_leftReelX, angle, leftRadius);
     _drawReel(_rightReelX, angle, rightRadius);
 }

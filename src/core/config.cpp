@@ -219,7 +219,7 @@ void Config::init() {
     } else {
         while (store.version != CONFIG_VERSION) { _setupVersion(); }
     }
-    if (store.clockFontStyle > CLOCKFONT_STYLE_ANDROIDCLOCK) { saveValue(&store.clockFontStyle, static_cast<uint8_t>(CLOCKFONT_STYLE)); }
+    if (store.clockFontStyle > CLOCKFONT_STYLE_SQUAREFONT) { saveValue(&store.clockFontStyle, static_cast<uint8_t>(CLOCKFONT_STYLE)); }
     if (store.clockFontStyle != CLOCKFONT_STYLE_DIGI7 && store.clockFontMono) { saveValue(&store.clockFontMono, false); }
     if (store.dateFormat > 4) { saveValue(&store.dateFormat, static_cast<uint8_t>(0)); }
     BOOTLOG("CONFIG_VERSION\t%d", store.version);
