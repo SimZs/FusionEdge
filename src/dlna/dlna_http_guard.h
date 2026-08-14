@@ -6,7 +6,17 @@
 extern SemaphoreHandle_t g_dlnaHttpMux;
 
 struct DlnaHttpGuard {
-  DlnaHttpGuard()  { if (g_dlnaHttpMux) xSemaphoreTake(g_dlnaHttpMux, portMAX_DELAY); }
-  ~DlnaHttpGuard() { if (g_dlnaHttpMux) xSemaphoreGive(g_dlnaHttpMux); }
+  SemaphoreHandle_t mutex;
+
+  DlnaHttpGuard() : mutex(g_dlnaHttpMux) {
+    if (mutex) xSemaphoreTake(mutex, portMAX_DELAY);
+  }
+
+  ~DlnaHttpGuard() {
+    if (mutex) xSemaphoreGive(mutex);
+  }
+
+  DlnaHttpGuard(const DlnaHttpGuard&) = delete;
+  DlnaHttpGuard& operator=(const DlnaHttpGuard&) = delete;
 };
 #endif

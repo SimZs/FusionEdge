@@ -102,13 +102,10 @@ void PlayModeWidget::_draw() {
     _spr->setTextDatum(middle_center);
 
     // BAL doboz: playmode (kitöltött → invertált szín)
-#ifdef USE_BLUETOOTH
-    const bool btMode = config.getMode() == PM_BLUETOOTH;
-    const char* modeStr = btMode ? "BT" : (_mode == PM_SDCARD) ? "SD" : (_mode == PM_BLUETOOTH) ? "BT" : "WEB";
-#else
-    constexpr bool btMode = false;
-    const char* modeStr = (_mode == PM_SDCARD) ? "SD" : "WEB";
-#endif
+    const bool btMode = _mode == DPS_BLUETOOTH;
+    const char* modeStr = (_mode == DPS_SDCARD) ? "SD"
+                        : (_mode == DPS_DLNA) ? "DLNA"
+                        : btMode ? "BT" : "WEB";
     _spr->setTextColor(bg, fg);
     _spr->drawString(modeStr, halfW / 2, boxH / 2);
 

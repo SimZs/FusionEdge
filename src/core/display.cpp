@@ -21,6 +21,9 @@
 #include "fonts.h"
 #include "speaker_bitmaps.h"
 #include "freertos/semphr.h"
+#ifdef USE_LASTFM_COVER
+#    include "coverart.h"
+#endif
 
 // Inline overlay sáv koordináták (elválasztóvonal alatt, wifi/vol widget felett)
 #define VOL_AREA_TOP    137
@@ -112,6 +115,7 @@ static bool isContentRequest(displayRequestType_e type, int payload = 0) {
     switch (type) {
         case NEWTITLE:
         case NEWSTATION:
+        case NEWCOVER:
         case DBITRATE:
         case PSTOP:
         case PSTART:
@@ -139,6 +143,7 @@ static bool isSplitPlayerRequest(displayRequestType_e type, int payload) {
     switch (type) {
         case NEWTITLE:
         case NEWSTATION:
+        case NEWCOVER:
         case DBITRATE:
             return true;
         case NEWMODE:
@@ -155,6 +160,7 @@ void Display::beginContentChange() {
     displayContentChanging = true;
     purgeQueuedRequestType(NEWTITLE);
     purgeQueuedRequestType(NEWSTATION);
+    purgeQueuedRequestType(NEWCOVER);
     purgeQueuedRequestType(DBITRATE);
     purgeQueuedRequestType(PLAYERREBUILD);
     purgeQueuedRequestType(PSTART);
@@ -830,6 +836,7 @@ void Display::putRequest(displayRequestType_e type, int payload) {
     switch (type) {
         case DRAWPLAYLIST:        case NEWTITLE:
         case NEWSTATION:
+        case NEWCOVER:
         case DBITRATE:
         case PLAYERREBUILD:
         case PSTART:
@@ -942,7 +949,13 @@ void Display::loop() {
                     break;
 
                 case NEWTITLE:
-                    if (_mode == PLAYER) { _title(); }
+                    if (_mode == PLAYER) {
+                        _title();
+                        _updateStationIcon();
+                    }
+                    break;
+                case NEWCOVER:
+                    if (_mode == PLAYER) { _updateStationIcon(); }
                     break;
                 case PLAYERREBUILD:
                     if (request.payload > 0 && request.payload != config.lastStation()) {
@@ -967,9 +980,9 @@ void Display::loop() {
                             _bitratewidget->setState(config.configFmt, config.station.bitrate);
                         }
                         if (_pmodewidget) {
-                            uint8_t pm = (config.getMode() == PM_SDCARD)    ? PM_SDCARD
-                                       : (config.getMode() == PM_BLUETOOTH)  ? PM_BLUETOOTH
-                                       : (config.store.playlistSource == PL_SRC_DLNA) ? 2 : PM_WEB;
+                            uint8_t pm = (config.getMode() == PM_SDCARD) ? DPS_SDCARD
+                                       : (config.getMode() == PM_BLUETOOTH) ? DPS_BLUETOOTH
+                                       : (config.store.playlistSource == PL_SRC_DLNA) ? DPS_DLNA : DPS_WEB;
                             _pmodewidget->setState(pm, config.getMode() == PM_BLUETOOTH ? 0 : config.lastStation());
                         }
                         if (request.payload > 0 && request.payload != config.lastStation()) {
@@ -979,34 +992,13 @@ void Display::loop() {
                         if (request.payload > 0 && request.payload != config.lastStation()) {
                             break;
                         }
-                        if (_stationIcon) {
-                            uint8_t pm = (config.getMode() == PM_SDCARD)    ? PM_SDCARD
-                                       : (config.getMode() == PM_BLUETOOTH)  ? PM_BLUETOOTH
-                                       : (config.store.playlistSource == PL_SRC_DLNA) ? 2 : PM_WEB;
-                            const char* iconLookupName = (config.getMode() == PM_BLUETOOTH)
-                                ? ""
-                                : (config.station.iconName[0] != '\0')
-                                    ? config.station.iconName
-                                    : config.station.name;
-                            _stationIcon->setStation(iconLookupName, pm);
-                        }
+                        _updateStationIcon();
                     }
                     break;
                 case NEWSTATION:
                     if (_mode == PLAYER) {
-                    _station();
-                    if (_stationIcon) {
-                        uint8_t pm = (config.getMode() == PM_SDCARD)    ? PM_SDCARD
-                                   : (config.getMode() == PM_BLUETOOTH)  ? PM_BLUETOOTH
-                                   : (config.store.playlistSource == PL_SRC_DLNA) ? 2 : PM_WEB;
-                        // BT módban ne keressünk stationIcon-t a map.csv-ből
-                        const char* iconLookupName = (config.getMode() == PM_BLUETOOTH)
-                            ? ""
-                            : (config.station.iconName[0] != '\0')
-                                ? config.station.iconName
-                                : config.station.name;
-                        _stationIcon->setStation(iconLookupName, pm);
-                    }
+                        _station();
+                        _updateStationIcon();
                     }
                     break;
                 case NEXTSTATION:
@@ -1029,9 +1021,9 @@ void Display::loop() {
                             _bitratewidget->setState(config.configFmt, config.station.bitrate);
                         }
                         if (_pmodewidget) {
-                            uint8_t pm = (config.getMode() == PM_SDCARD)    ? PM_SDCARD
-                                       : (config.getMode() == PM_BLUETOOTH)  ? PM_BLUETOOTH
-                                       : (config.store.playlistSource == PL_SRC_DLNA) ? 2 : PM_WEB;
+                            uint8_t pm = (config.getMode() == PM_SDCARD) ? DPS_SDCARD
+                                       : (config.getMode() == PM_BLUETOOTH) ? DPS_BLUETOOTH
+                                       : (config.store.playlistSource == PL_SRC_DLNA) ? DPS_DLNA : DPS_WEB;
                             _pmodewidget->setState(pm, config.getMode() == PM_BLUETOOTH ? 0 : config.lastStation());
                         }
                         // Beállítja a csatorna számát a widgeten
@@ -1229,6 +1221,32 @@ void Display::_station() {
     nextion.bitrate(config.station.bitrate);
     nextion.bitratePic(ICON_NA);
   #endif*/
+}
+
+void Display::_updateStationIcon() {
+    if (!_stationIcon) return;
+
+#ifdef USE_LASTFM_COVER
+    uint8_t* coverData = nullptr;
+    size_t coverSize = 0;
+    bool coverIsJpeg = false;
+    uint32_t coverGeneration = 0;
+    if (coverArt.copyReadyFor(config.station.title,
+                              config.getMode() == PM_BLUETOOTH,
+                              coverData, coverSize,
+                              coverIsJpeg, coverGeneration)) {
+        _stationIcon->setCover(coverData, coverSize, coverIsJpeg, coverGeneration);
+        return;
+    }
+#endif
+
+    const uint8_t pm = (config.getMode() == PM_SDCARD) ? DPS_SDCARD
+                     : (config.getMode() == PM_BLUETOOTH) ? DPS_BLUETOOTH
+                     : (config.store.playlistSource == PL_SRC_DLNA) ? DPS_DLNA : DPS_WEB;
+    const char* iconLookupName = (config.getMode() == PM_BLUETOOTH)
+        ? ""
+        : (config.station.iconName[0] != '\0') ? config.station.iconName : config.station.name;
+    _stationIcon->setStation(iconLookupName, pm);
 }
 
 char* split(char* str, const char* delim) {
@@ -2097,6 +2115,14 @@ void Display::modeSelectorConfirm() {
     if (val == -1) {
         config.toggleMode();
     } else {
+#ifdef USE_DLNA
+        // DLNA is represented as PM_WEB + PL_SRC_DLNA. Selecting WEB must
+        // therefore switch the logical playlist source as well as the mode.
+        if (val == PM_WEB) {
+            config.store.playlistSource = PL_SRC_WEB;
+            config.saveValue(&config.store.playlistSource, (uint8_t)PL_SRC_WEB);
+        }
+#endif
         config.changeMode(val);
     }
 }

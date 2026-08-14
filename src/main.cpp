@@ -9,6 +9,9 @@
 #include "core/display.h"
 #include "core/network.h"
 #include "core/netserver.h"
+#ifdef USE_LASTFM_COVER
+#    include "core/coverart.h"
+#endif
 #include "core/controls.h"
 #ifdef USE_BLUETOOTH
 #    include "core/bluetooth.h"
@@ -206,6 +209,9 @@ void setup() {
 
     player.init();
     network.begin();
+#ifdef USE_LASTFM_COVER
+    coverArt.begin();
+#endif
     if (network.status != CONNECTED && network.status != SDREADY) {
         netserver.begin();
         initControls();

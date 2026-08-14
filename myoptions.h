@@ -17,6 +17,10 @@
 #define CLOCK_TTS_LANGUAGE "hu" //Default language TTS e.g. pl,en,de,ru,fr,hu
 // #define IMPERIALUNIT // English weather: Fahrenheit, inHg and mph (requires LANGUAGE EN)
 
+// Optional current-track album art from Last.fm (WEB, SD, DLNA and Bluetooth metadata).
+// #define USE_LASTFM_COVER
+// #define LASTFM_API_KEY "your_lastfm_api_key"
+
 // Animated cassette replaces the clock during the non-blank "While playing" screensaver.
 #define USE_CASSETTE_SCREENSAVER
 // #define CASSETTE_FRAME_MS 100UL // Reel animation interval; lower values increase display load.

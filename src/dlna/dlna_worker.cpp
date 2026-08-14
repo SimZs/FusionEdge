@@ -115,7 +115,44 @@ static void dlna_worker_task(void* ) {
    // int err = 0;
 
     // !!! FONTOS: itt semmilyen AsyncWebServerRequest nincs, csak paraméterek
-    if (j.type == DJ_BUILD) {
+    if (j.type == DJ_LIST) {
+      dlna_status_setBusy(j, "list");
+
+      if (!g_dlnaControlUrl.length()) {
+        dlna_status_setDone(j, false, 503, "DLNA not initialized");
+        continue;
+      }
+
+      DlnaIndex idx;
+      String json;
+      log_i("##[DLNA]# worker list begin objectId='%s' start=%u",
+            j.objectId, static_cast<unsigned>(j.start));
+      ok = idx.listContainer(g_dlnaControlUrl, j.objectId, json, j.start);
+      if (!ok) {
+        dlna_status_setDone(j, false, 500, "list failed");
+        continue;
+      }
+
+      xSemaphoreTake(g_littlefsMux, portMAX_DELAY);
+      File out = LittleFS.open(DLNA_BROWSE_JSON_PATH, "w");
+      const size_t written = out ? out.print(json) : 0;
+      if (out) out.close();
+      xSemaphoreGive(g_littlefsMux);
+
+      if (written != json.length()) {
+        xSemaphoreTake(g_littlefsMux, portMAX_DELAY);
+        LittleFS.remove(DLNA_BROWSE_JSON_PATH);
+        xSemaphoreGive(g_littlefsMux);
+        dlna_status_setDone(j, false, 500, "list write failed");
+        continue;
+      }
+
+      log_i("##[DLNA]# worker list ready objectId='%s' start=%u bytes=%u",
+            j.objectId, static_cast<unsigned>(j.start),
+            static_cast<unsigned>(written));
+      dlna_status_setDone(j, true, 0, "list ok");
+    }
+    else if (j.type == DJ_BUILD) {
       dlna_status_setBusy(j, "build");
 
       if (!g_dlnaControlUrl.length()) {
@@ -257,6 +294,7 @@ else if (j.type == DJ_INIT) {
 
   String errStr;
   String rootId = String(dlnaIDX);
+  log_i("##[DLNA]# init rootObjectId='%s'", rootId.c_str());
 
   vTaskDelay(1);
 
@@ -289,7 +327,7 @@ void dlna_worker_start() {
     "dlna_worker",
     24 * 1024,     // 12KB elég (ha kell, később feljebb)
     nullptr,
-    2,             // közepes prio
+    0,             // background network work; keep CPU0 idle/WDT serviceable
     &s_workerTask,
     0              // !!! CORE0 (nálad core1 halál)
   );
@@ -303,8 +341,15 @@ void dlna_worker_start() {
 }
 
 
-void dlna_worker_enqueue(const DlnaJob& j) {
-  if (!g_dlnaQueue) return;
-  xQueueSend(g_dlnaQueue, &j, 0);
+bool dlna_worker_enqueue(const DlnaJob& j) {
+  if (!g_dlnaQueue) return false;
+
+  // Reserve the single DLNA worker immediately. Without this, another HTTP
+  // callback can enqueue a duplicate job before the worker starts running.
+  dlna_status_setBusy(j, "queued");
+  if (xQueueSend(g_dlnaQueue, &j, 0) == pdTRUE) return true;
+
+  dlna_status_setDone(j, false, 503, "queue full");
+  return false;
 }
 #endif   // USE_DLNA

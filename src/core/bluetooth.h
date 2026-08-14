@@ -36,7 +36,10 @@ class BluetoothPlayer {
     void setVol(uint8_t step0to32);
 
     // --- status / metadata ---
-    bool       connected()  const { return _state >= BT_STATE_CONNECTED; }
+    bool       connected()  const {
+        return _state == BT_STATE_CONNECTED || _state == BT_STATE_PLAYING ||
+               _state == BT_STATE_PAUSED;
+    }
     bool       playing()    const { return _state == BT_STATE_PLAYING; }
     btState_e  state()      const { return _state; }
     String     title()      const { return _title; }

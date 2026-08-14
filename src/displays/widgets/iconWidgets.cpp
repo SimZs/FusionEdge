@@ -202,7 +202,54 @@ void StationIconWidget::_freePng() {
     if (_buf) { free(_buf); _buf = nullptr; }
     _sz    = 0;
     _valid = false;
+#ifdef USE_LASTFM_COVER
+    _jpeg = false;
+    _imageWidth = ICO_W;
+    _imageHeight = ICO_H;
+    _coverGeneration = 0;
+#endif
 }
+
+#ifdef USE_LASTFM_COVER
+void StationIconWidget::_setImageSize() {
+    _imageWidth = ICO_W;
+    _imageHeight = ICO_H;
+    if (!_buf || _sz < 24) return;
+
+    if (!_jpeg && _buf[0] == 0x89 && _buf[1] == 'P' && _buf[2] == 'N' && _buf[3] == 'G') {
+        _imageWidth = static_cast<uint16_t>((static_cast<uint32_t>(_buf[16]) << 24) |
+                                            (static_cast<uint32_t>(_buf[17]) << 16) |
+                                            (static_cast<uint32_t>(_buf[18]) << 8) | _buf[19]);
+        _imageHeight = static_cast<uint16_t>((static_cast<uint32_t>(_buf[20]) << 24) |
+                                             (static_cast<uint32_t>(_buf[21]) << 16) |
+                                             (static_cast<uint32_t>(_buf[22]) << 8) | _buf[23]);
+        return;
+    }
+
+    if (_jpeg && _buf[0] == 0xFF && _buf[1] == 0xD8) {
+        size_t offset = 2;
+        while (offset + 9 < _sz) {
+            if (_buf[offset] != 0xFF) { ++offset; continue; }
+            const uint8_t marker = _buf[offset + 1];
+            if (marker == 0xD8 || marker == 0xD9) { offset += 2; continue; }
+            if (offset + 3 >= _sz) break;
+            const uint16_t segmentLength = (static_cast<uint16_t>(_buf[offset + 2]) << 8) |
+                                           _buf[offset + 3];
+            if (segmentLength < 2 || offset + 2 + segmentLength > _sz) break;
+            const bool isSof = (marker >= 0xC0 && marker <= 0xC3) ||
+                               (marker >= 0xC5 && marker <= 0xC7) ||
+                               (marker >= 0xC9 && marker <= 0xCB) ||
+                               (marker >= 0xCD && marker <= 0xCF);
+            if (isSof && segmentLength >= 7) {
+                _imageHeight = (static_cast<uint16_t>(_buf[offset + 5]) << 8) | _buf[offset + 6];
+                _imageWidth = (static_cast<uint16_t>(_buf[offset + 7]) << 8) | _buf[offset + 8];
+                return;
+            }
+            offset += 2 + segmentLength;
+        }
+    }
+}
+#endif
 
 bool StationIconWidget::_loadPng(const char* path) {
     _freePng();
@@ -220,26 +267,64 @@ bool StationIconWidget::_loadPng(const char* path) {
     }
     _buf   = buf;
     _sz    = sz;
+#ifdef USE_LASTFM_COVER
+    _jpeg  = false;
+#endif
     _valid = true;
     _dirty = true;
+#ifdef USE_LASTFM_COVER
+    _coverGeneration = 0;
+    _setImageSize();
+#endif
     return true;
 }
 
+#ifdef USE_LASTFM_COVER
+void StationIconWidget::setCover(uint8_t* data, size_t size, bool jpeg, uint32_t generation) {
+    if (!data || size == 0 || generation == 0) {
+        if (data) free(data);
+        return;
+    }
+    if (_coverGeneration == generation && _valid) {
+        free(data);
+        if (_active && !_locked) _draw();
+        return;
+    }
+
+    _freePng();
+    _buf = data;
+    _sz = size;
+    _jpeg = jpeg;
+    _valid = true;
+    _dirty = true;
+    _coverGeneration = generation;
+    _path[0] = '\0';
+    _setImageSize();
+    if (_active && !_locked) _draw();
+}
+#endif
+
 void StationIconWidget::setStation(const char* stationName, uint8_t playMode) {
     char path[64];
-    if (playMode == 0) {
+    if (playMode == DPS_WEB) {
         if (!stationMapLookup(stationName, path, sizeof(path)))
             strlcpy(path, "/images/stations/plmodeweb.png", sizeof(path));
-    } else if (playMode == 1) {
+    } else if (playMode == DPS_SDCARD) {
         strlcpy(path, "/images/stations/plmodesd.png", sizeof(path));
 #ifdef USE_BLUETOOTH
-    } else if (playMode == PM_BLUETOOTH) {
+    } else if (playMode == DPS_BLUETOOTH) {
         strlcpy(path, "/images/stations/plmodebt.png", sizeof(path));
 #endif
-    } else {
+    } else if (playMode == DPS_DLNA) {
         strlcpy(path, "/images/stations/plmodedlna.png", sizeof(path));
+    } else {
+        strlcpy(path, "/images/stations/plmodeweb.png", sizeof(path));
     }
-    if (!_valid || strcmp(_path, path) != 0) {
+    if (!_valid
+#ifdef USE_LASTFM_COVER
+        || _coverGeneration != 0
+#endif
+        || strcmp(_path, path) != 0) {
         if (!_loadPng(path)) {
             _path[0] = '\0';
             return;
@@ -264,7 +349,24 @@ void StationIconWidget::_draw() {
         return;
     }
     _spr->fillSprite(_bgcolor);
+#ifdef USE_LASTFM_COVER
+    if (_coverGeneration != 0) {
+        const float scaleX = _imageWidth > 0 ? static_cast<float>(ICO_W) / _imageWidth : 1.0f;
+        const float scaleY = _imageHeight > 0 ? static_cast<float>(ICO_H) / _imageHeight : 1.0f;
+        const float scale = scaleX < scaleY ? scaleX : scaleY;
+        if (_jpeg) {
+            _spr->drawJpg(_buf, _sz, 0, 0, ICO_W, ICO_H, 0, 0,
+                          scale, scale, datum_t::middle_center);
+        } else {
+            _spr->drawPng(_buf, _sz, 0, 0, ICO_W, ICO_H, 0, 0,
+                          scale, scale, datum_t::middle_center);
+        }
+    } else {
+        _spr->drawPng(_buf, _sz, 0, 0, ICO_W, ICO_H);
+    }
+#else
     _spr->drawPng(_buf, _sz, 0, 0, ICO_W, ICO_H);
+#endif
 
     // Lekerekített sarok maszk - pixel-pontos módszer:
     // Csak a sarokzónában lévő pixeleket fedi le, amelyek kívül esnek a köríven

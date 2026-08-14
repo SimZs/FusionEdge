@@ -378,9 +378,12 @@ void Player::loop() {
         } else {
           strlcpy(config.station.name, "URL", sizeof(config.station.name));
         }
-        // FusionEdge: direkt URL/preset lejátszásnál nincs playlist-bejegyzés,
-        // tehát nincs érvényes map.csv-kompatibilis név, és nincs genre sem.
-        config.station.iconName[0] = '\0';
+        // Preserve the original preset name as the stable map.csv key. ICY
+        // metadata may replace station.name later without losing its icon.
+        const char* iconName = config.station.name[0] == '.'
+                                 ? config.station.name + 1
+                                 : config.station.name;
+        strlcpy(config.station.iconName, iconName, sizeof(config.station.iconName));
         config.station.genre[0] = '\0';
         strlcpy(config.station.url, _urlBuf, sizeof(config.station.url));
         config.station.title[0] = '\0';

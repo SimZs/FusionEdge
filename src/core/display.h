@@ -91,6 +91,7 @@ class Display {
 #    endif
 
   private:
+    void _updateStationIcon();
     ScrollWidget *  _meta, *_title1, *_plcurrent, *_weather, *_title2;
     PlayListWidget* _plwidget;
     BitrateWidget*  _bitratewidget;

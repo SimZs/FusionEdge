@@ -20,8 +20,6 @@ bool dlnaInit(const String& rootObjectId, String& err) {
   g_dlnaReady = false;
   g_dlnaControlUrl = "";
 
-  player.sendCommand({PR_STOP, 0});
-
   DlnaSSDP ssdp;
   DlnaDescription desc;
   DlnaIndex idx;
@@ -88,6 +86,10 @@ uint32_t dlna_next_reqId() {
 
 bool dlna_isBusy() {
   return g_dlnaStatus.busy;
+}
+
+bool dlna_isReady() {
+  return g_dlnaReady && g_dlnaControlUrl.length() > 0;
 }
 
 #endif   // USE_DLNA

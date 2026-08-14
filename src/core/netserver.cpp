@@ -547,6 +547,11 @@ bool NetServer::begin(bool quiet) {
   webserver.on("/dlna/init", HTTP_GET, [](AsyncWebServerRequest *request) {
     //DLNA modplus
 
+    if (dlna_isReady() && LittleFS.exists(DLNA_LIST_JSON_PATH)) {
+      request->send(200, "application/json", "{\"queued\":false,\"ready\":true}");
+      return;
+    }
+
     if (dlna_isBusy()) {
       request->send(429, "application/json", "{\"queued\":false,\"busy\":true}");
       return;
@@ -561,9 +566,58 @@ bool NetServer::begin(bool quiet) {
     j.type = DJ_INIT;
     j.reqId = dlna_next_reqId();
 
-    dlna_worker_enqueue(j);
+    if (!dlna_worker_enqueue(j)) {
+      request->send(503, "application/json", "{\"queued\":false,\"error\":\"DLNA queue unavailable\"}");
+      return;
+    }
+    char response[96];
+    snprintf(response, sizeof(response),
+             "{\"queued\":true,\"reqId\":%u}",
+             static_cast<unsigned>(j.reqId));
+    request->send(202, "application/json", response);
+  });
 
-    request->send(202, "application/json", "{\"queued\":true}");
+  /* ================= DLNA CONFIG ================= */
+  webserver.on("/dlna/info", HTTP_GET, [](AsyncWebServerRequest *request) {
+    String rootObjectId = String(dlnaIDX);
+    rootObjectId.replace("\\", "\\\\");
+    rootObjectId.replace("\"", "\\\"");
+    String json = "{\"rootObjectId\":\"";
+    json += rootObjectId;
+    json += "\"}";
+    AsyncWebServerResponse *response = request->beginResponse(200, "application/json", json);
+    response->addHeader("Cache-Control", "no-store");
+    request->send(response);
+  });
+
+  /* ================= DLNA LIST RESULT ================= */
+  // This route must be registered before /dlna/list. The bundled
+  // AsyncWebServer also treats /dlna/list as a prefix for /dlna/list/*.
+  webserver.on("/dlna/list/result", HTTP_GET, [](AsyncWebServerRequest *request) {
+    if (!request->hasParam("reqId")) {
+      request->send(400, "application/json", "{\"ok\":false,\"error\":\"Missing reqId\"}");
+      return;
+    }
+    const uint32_t reqId = request->getParam("reqId")->value().toInt();
+    log_i("##[DLNA]# list result reqId=%u current=%u busy=%u ok=%u msg='%s'",
+          static_cast<unsigned>(reqId),
+          static_cast<unsigned>(g_dlnaStatus.reqId),
+          g_dlnaStatus.busy ? 1U : 0U,
+          g_dlnaStatus.ok ? 1U : 0U,
+          g_dlnaStatus.msg);
+    if (g_dlnaStatus.busy || g_dlnaStatus.reqId != reqId) {
+      request->send(409, "application/json", "{\"ok\":false,\"error\":\"Result not ready\"}");
+      return;
+    }
+    if (!g_dlnaStatus.ok || strcmp(g_dlnaStatus.msg, "list ok") != 0 ||
+        !LittleFS.exists(DLNA_BROWSE_JSON_PATH)) {
+      request->send(404, "application/json", "{\"ok\":false,\"error\":\"List result unavailable\"}");
+      return;
+    }
+    AsyncWebServerResponse *response =
+        request->beginResponse(LittleFS, DLNA_BROWSE_JSON_PATH, "application/json");
+    response->addHeader("Cache-Control", "no-store, no-cache, must-revalidate");
+    request->send(response);
   });
 
   /* ================= DLNA LIST ================= */
@@ -580,20 +634,45 @@ bool NetServer::begin(bool quiet) {
 
     String objectId = request->getParam("objectId")->value();
     uint32_t start = request->hasParam("start") ? request->getParam("start")->value().toInt() : 0;
+    log_i("##[DLNA]# list objectId='%s' start=%u", objectId.c_str(),
+          static_cast<unsigned>(start));
 
-    String json;
-
-    DlnaIndex idx;
-    bool ok = idx.listContainer(g_dlnaControlUrl, objectId, json, start);
-
-    if (!ok) {
-      request->send(500, "application/json", "{\"ok\":false,\"error\":\"Browse failed\"}");
+    // DJ_INIT already browsed dlnaIDX on the worker task and created this
+    // cache. Serving it here avoids a blocking SOAP request from AsyncTCP's
+    // callback exactly when dlna.html opens (the common watchdog/reset path).
+    if (objectId == String(dlnaIDX) && start == 0) {
+      if (!LittleFS.exists(DLNA_LIST_JSON_PATH)) {
+        request->send(503, "application/json",
+                      "{\"ok\":false,\"error\":\"DLNA root index not ready\"}");
+        return;
+      }
+      AsyncWebServerResponse *response =
+          request->beginResponse(LittleFS, DLNA_LIST_JSON_PATH, "application/json");
+      response->addHeader("Cache-Control", "no-store, no-cache, must-revalidate");
+      request->send(response);
       return;
     }
 
-    AsyncWebServerResponse *r = request->beginResponse(200, "application/json", json);
-    r->addHeader("Cache-Control", "no-store");
-    request->send(r);
+    if (dlna_isBusy()) {
+      request->send(429, "application/json", "{\"queued\":false,\"busy\":true}");
+      return;
+    }
+
+    DlnaJob job{};
+    job.type = DJ_LIST;
+    strlcpy(job.objectId, objectId.c_str(), sizeof(job.objectId));
+    job.reqId = dlna_next_reqId();
+    job.start = start;
+    if (!dlna_worker_enqueue(job)) {
+      request->send(503, "application/json", "{\"queued\":false,\"error\":\"DLNA queue unavailable\"}");
+      return;
+    }
+
+    char response[96];
+    snprintf(response, sizeof(response),
+             "{\"queued\":true,\"reqId\":%u}",
+             static_cast<unsigned>(job.reqId));
+    request->send(202, "application/json", response);
   });
 
   /* ================= DLNA BUILD ================= */
@@ -617,10 +696,13 @@ bool NetServer::begin(bool quiet) {
     j.reqId = dlna_next_reqId();
     j.hardLimit = request->hasParam("limit") ? request->getParam("limit")->value().toInt() : 20000;
 
-    dlna_worker_enqueue(j);
+    if (!dlna_worker_enqueue(j)) {
+      request->send(503, "application/json", "{\"queued\":false,\"error\":\"DLNA queue unavailable\"}");
+      return;
+    }
     char buf[96];
     snprintf(buf, sizeof(buf), "{\"queued\":true,\"reqId\":%u}", (unsigned)j.reqId);
-    request->send(202, "application/json", "{\"queued\":true}");
+    request->send(202, "application/json", buf);
   });
 
   /* ================= DLNA APPEND ================= */
@@ -644,10 +726,13 @@ bool NetServer::begin(bool quiet) {
     j.reqId = dlna_next_reqId();
     j.hardLimit = request->hasParam("limit") ? request->getParam("limit")->value().toInt() : 20000;
 
-    dlna_worker_enqueue(j);
+    if (!dlna_worker_enqueue(j)) {
+      request->send(503, "application/json", "{\"queued\":false,\"error\":\"DLNA queue unavailable\"}");
+      return;
+    }
     char buf[96];
     snprintf(buf, sizeof(buf), "{\"queued\":true,\"reqId\":%u}", (unsigned)j.reqId);
-    request->send(202, "application/json", "{\"queued\":true}");
+    request->send(202, "application/json", buf);
   });
 
   /* ================= DLNA STATUS ================= */
@@ -819,6 +904,31 @@ bool NetServer::begin(bool quiet) {
   webserver.on("/dragpl.js", HTTP_GET, [sendWebFile](AsyncWebServerRequest *request) {
     sendWebFile(request, "/www/dragpl.js", "/www/dragpl.js.gz", "application/javascript");
   });
+
+#ifdef USE_DLNA
+  // The DLNA browser and its firmware endpoints must stay in sync. Prevent a
+  // cached older page from interpreting queued (202) worker replies as lists.
+  webserver.on("/dlna.html", HTTP_GET, [](AsyncWebServerRequest *request) {
+    const char *plainPath = "/www/dlna.html";
+    const char *gzipPath = "/www/dlna.html.gz";
+    AsyncWebServerResponse *response = nullptr;
+
+    if (LittleFS.exists(plainPath)) {
+      response = request->beginResponse(LittleFS, plainPath, "text/html");
+    } else if (LittleFS.exists(gzipPath)) {
+      response = request->beginResponse(LittleFS, gzipPath, "text/html");
+      response->addHeader("Content-Encoding", "gzip");
+    } else {
+      request->send(404, "text/plain", "Not found");
+      return;
+    }
+
+    response->addHeader("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
+    response->addHeader("Pragma", "no-cache");
+    response->addHeader("Expires", "0");
+    request->send(response);
+  });
+#endif
 
   webserver.on("/theme", HTTP_GET, [](AsyncWebServerRequest *request) {
     AsyncWebServerResponse *response = request->beginResponse(200, "application/json", config.themeToJson());

@@ -8,6 +8,23 @@ FusionEdge is an ESP32-S3 internet radio firmware built on the yoRadio codebase.
 
 The project grew from the LovyanGFX/LittleFS-based [VTomRadio](https://github.com/VaraiTamas/VTomRadio/tree/main) variant. FusionEdge keeps the original yoRadio playback architecture while substantially extending the display, controls, audio visualization and source handling.
 
+## Project status
+
+FusionEdge is now feature-complete. Version 1.0.5 is the final planned feature
+release; future updates will focus on confirmed bug fixes and compatibility
+maintenance.
+
+### Version 1.0.5
+
+- Optional current-track album art from Last.fm, MusicBrainz and Cover Art
+  Archive for WEB, SD, DLNA and Bluetooth playback
+- A more reliable asynchronous DLNA WebUI browser with configured root-folder
+  support and paged directory listings
+- Correct source icons and mode handling when switching between DLNA, WEB and
+  Bluetooth playback
+- Serialized, low-priority cover and DLNA network work to preserve audio
+  playback memory and watchdog responsiveness
+
 ## Main target
 
 - ESP32-S3 with PSRAM
@@ -55,6 +72,55 @@ The tested Bluetooth path uses a QCC5124EL module:
 - Metadata, touch/encoder/WebUI mode switching and spectrum visualization are supported
 
 The working bridge parameters are kept in `src/core/bluetooth_config.h`.
+
+## DLNA browser
+
+When `USE_DLNA` is enabled, set `dlnaHost` to the media server address and
+`dlnaIDX` to the preferred root object ID in `myoptions.h`. The DLNA page in the
+WebUI opens at that configured root, lists folders and tracks, and can build or
+append entries to the playback list.
+
+Directory browsing runs through a background worker instead of the web-server
+callback. This keeps SOAP requests away from the AsyncTCP task and makes larger
+or slower media-server libraries considerably more reliable. The WebUI and
+firmware endpoints are version-dependent, so upload the v1.0.5 LittleFS data
+along with the firmware when upgrading from an earlier release.
+
+## Last.fm album art
+
+Current-track album art can optionally replace the station/source icon in WEB,
+SD, DLNA and Bluetooth modes. Create a Last.fm API account, then add the
+following to `myoptions.h`:
+
+```cpp
+#define USE_LASTFM_COVER
+#define LASTFM_API_KEY "your_lastfm_api_key"
+```
+
+The lookup runs in a low-priority background task and only starts when metadata
+contains both an artist and a title in `Artist - Title` form. Last.fm
+`track.getInfo` with autocorrection resolves the album's MusicBrainz ID; the
+250-pixel front image is then retrieved from the Cover Art Archive. If Last.fm
+does not return an album ID, FusionEdge searches MusicBrainz for a matching
+release group. Images are kept in PSRAM and are not written to LittleFS. While
+a cover is unavailable, downloading or invalid, the normal station or source
+icon remains visible.
+
+Bluetooth metadata receives an additional fallback for video services. If the
+QCC artist field contains a channel name and the exact lookup fails, FusionEdge
+cleans the video title and resolves it with Last.fm `track.search`. Local files
+still use their exact embedded artist and title metadata first.
+
+Cover lookup uses plain HTTP and keeps its task stack and JSON allocations in
+PSRAM. This is intentional: opening another TLS session can consume the
+contiguous internal RAM required by HTTPS audio streams on the ESP32-S3. Only
+the Last.fm API key is sent; do not add a Last.fm shared secret to the firmware.
+
+This integration uses metadata from Last.fm and MusicBrainz, and cover art from
+the [Cover Art Archive](https://musicbrainz.org/doc/Cover_Art_Archive). Review the
+[Last.fm API terms](https://www.last.fm/api/tos), retain the required Last.fm
+credit in redistributed builds, and respect the rights of artists and labels
+when using Cover Art Archive images.
 
 ## Weather units
 

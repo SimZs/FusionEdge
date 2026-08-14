@@ -8,6 +8,9 @@
 #include "netserver.h"
 #include "controls.h"
 #include "timekeeper.h"
+#ifdef USE_LASTFM_COVER
+#    include "coverart.h"
+#endif
 #include "rtcsupport.h"
 #include "../displays/tools/language.h"
 #include "driver/rtc_io.h"
@@ -1642,6 +1645,12 @@ void Config::setTitle(const char* title) {
     memset(config.station.title, 0, BUFLEN);
     strlcpy(config.station.title, title, BUFLEN);
     u8fix(config.station.title);
+#ifdef USE_LASTFM_COVER
+    coverArt.requestCombined(strcmp(config.station.title, config.station.name) == 0
+                                 ? ""
+                                 : config.station.title,
+                             getMode() == PM_BLUETOOTH);
+#endif
     netserver.requestOnChange(TITLE, 0);
     // netserver.loop() szándékosan NINCS itt hívva — az azonnali WebSocket
     // flush WiFi DMA forgalmat generál miközben a display task SPI DMA-n

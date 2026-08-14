@@ -57,6 +57,15 @@ extern QueueHandle_t irQueue;
 
 enum PlaylistSource : uint8_t { PL_SRC_WEB = 0, PL_SRC_DLNA = 1 };
 
+// Display-only source identifiers. DLNA is a WEB playback engine source, not
+// a playMode_e value, so it must not share PM_BLUETOOTH's numeric value.
+enum displayPlaySource_e : uint8_t {
+    DPS_WEB = 0,
+    DPS_SDCARD = 1,
+    DPS_DLNA = 2,
+    DPS_BLUETOOTH = 3,
+};
+
 void u8fix(char* src);
 
 void checkAllTasksStack();

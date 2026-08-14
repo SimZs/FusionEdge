@@ -171,7 +171,9 @@ void BluetoothPlayer::loop() {
     // Ha érkezett új cím/előadó, küldjük a display-re.
     // Feltétel: connected legyen (BT_PA vagy BT_STOP is jó — kézi trackváltásnál
     // a metaadat BT_STOP állapotban érkezik, BT_PA csak utána jön)
-    if (_metaUpdated && _state >= BT_STATE_CONNECTED) {
+    // Cache AVRCP metadata in every mode, but publish it only while Bluetooth
+    // is selected. Otherwise a connected phone or PC overwrites WEB/SD/DLNA.
+    if (_metaUpdated && connected() && config.getMode() == PM_BLUETOOTH) {
         _metaUpdated = false;
         String info;
         if (_artist.length() > 0 && _title.length() > 0) {
@@ -199,6 +201,7 @@ void BluetoothPlayer::clearMeta() {
     _trackMs    = 0;
     _streamCodec[0] = '\0';
     _streamBits = 0;
+    _metaUpdated = false;
 }
 
 void BluetoothPlayer::setFallbackTitle(const char* title) {

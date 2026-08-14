@@ -243,8 +243,8 @@ bool DlnaIndex::listContainer(const String& controlUrl, const String& objectId, 
   String didl;
   uint32_t ret = 0, tot = 0;
 
-  // 200 elég a UI-hoz, indexeléshez majd külön autoBuildPlaylist lapoz
-  const uint32_t pageSize = 200;
+  // Small pages keep the SOAP/XML response within fragmented internal RAM.
+  const uint32_t pageSize = 25;
   if (!browsePage(controlUrl, objectId, start, pageSize, didl, ret, tot)) return false;
 
   std::vector<String> cids, ctitles;
@@ -444,7 +444,7 @@ bool DlnaIndex::buildContainerIndex(const String& controlUrl, const String& root
   String didl;
   uint32_t ret = 0, tot = 0;
 
-  if (!browsePage(controlUrl, rootObjectId, 0, 200, didl, ret, tot))
+  if (!browsePage(controlUrl, rootObjectId, 0, 25, didl, ret, tot))
     return false;
 
   // 🔑 yield browse után
@@ -678,4 +678,3 @@ String DlnaIndex::beautifyTitle(const String& raw) {
 
 
 #endif // USE_DLNA
-

@@ -13,6 +13,7 @@ bool dlnaBuild(const String& objectId, bool activate, int& count, String& err);
 void dlna_service_begin();
 uint32_t dlna_next_reqId();
 bool dlna_isBusy();
+bool dlna_isReady();
 
 extern String g_dlnaControlUrl;
 

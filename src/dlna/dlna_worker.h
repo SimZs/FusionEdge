@@ -4,13 +4,22 @@
 #include "freertos/queue.h"
 #include "freertos/semphr.h"
 
-enum DlnaJobType : uint8_t { DJ_INIT=0, DJ_BUILD=1, DJ_APPEND=2, DJ_CANCEL=3 };
+enum DlnaJobType : uint8_t {
+  DJ_INIT = 0,
+  DJ_BUILD = 1,
+  DJ_APPEND = 2,
+  DJ_CANCEL = 3,
+  DJ_LIST = 4,
+};
+
+#define DLNA_BROWSE_JSON_PATH "/data/dlna_browse.json"
 
 struct DlnaJob {
   DlnaJobType type;
   char objectId[64];   // DLNA objectId
 //  char key[32];        // opcionális: category/genre key
   uint32_t reqId;      // monoton növekvő request id
+  uint32_t start;
   uint32_t hardLimit;
 };
 
@@ -28,7 +37,7 @@ extern SemaphoreHandle_t g_littlefsMux;
 extern DlnaStatus g_dlnaStatus;
 
 void dlna_worker_start();
-void dlna_worker_enqueue(const DlnaJob& j);
+bool dlna_worker_enqueue(const DlnaJob& j);
 void dlna_status_setBusy(const DlnaJob& j, const char* msg);
 void dlna_status_setDone(const DlnaJob& j, bool ok, int err, const char* msg);
 uint32_t dlna_playlist_version();

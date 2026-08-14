@@ -11,3 +11,7 @@
 #if defined(IMPERIALUNIT) && LANGUAGE != EN
 #  error IMPERIALUNIT currently requires LANGUAGE EN because the imperial weather labels are defined in language_en.h
 #endif
+
+#if defined(USE_LASTFM_COVER) && !defined(LASTFM_API_KEY)
+#  error USE_LASTFM_COVER requires LASTFM_API_KEY in myoptions.h
+#endif

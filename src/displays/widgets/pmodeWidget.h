@@ -19,7 +19,7 @@ class PlayModeWidget : public Widget {
 
     void init(BitrateBoxConfig boxconf, uint16_t fgcolor, uint16_t bgcolor);
     void setState(uint8_t playMode, uint16_t num);
-    void setMode(uint8_t playMode);   // PM_WEB=0, PM_SDCARD=1, + DLNA=2
+    void setMode(uint8_t playMode);   // displayPlaySource_e
     void setNum(uint16_t num);
     void invalidate();                // Force redraw with current theme color
 

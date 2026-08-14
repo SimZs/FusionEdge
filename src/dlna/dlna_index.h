@@ -7,6 +7,8 @@
 #include <FS.h>
 #include <vector>
 
+#define DLNA_LIST_JSON_PATH "/data/dlna_index.json"
+
 class DlnaIndex {
 public:
   DlnaIndex() = default;

@@ -47,6 +47,9 @@ class StationIconWidget : public Widget {
     using Widget::init;
     void init(WidgetConfig wconf, uint16_t bgcolor);
     void setStation(const char* stationName, uint8_t playMode);
+#ifdef USE_LASTFM_COVER
+    void setCover(uint8_t* data, size_t size, bool jpeg, uint32_t generation);
+#endif
     void clearStation();
     ~StationIconWidget();
 
@@ -61,8 +64,17 @@ class StationIconWidget : public Widget {
     uint16_t _bgcolor = 0;
     LGFX_Sprite* _spr = nullptr;
     char _path[64] = {0};
+#ifdef USE_LASTFM_COVER
+    bool _jpeg = false;
+    uint16_t _imageWidth = ICO_W;
+    uint16_t _imageHeight = ICO_H;
+    uint32_t _coverGeneration = 0;
+#endif
 
     bool _loadPng(const char* path);
+#ifdef USE_LASTFM_COVER
+    void _setImageSize();
+#endif
     void _freePng();
     void _ensureSprite();
     void _deleteSprite();
