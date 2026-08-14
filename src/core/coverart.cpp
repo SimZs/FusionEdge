@@ -21,6 +21,8 @@ constexpr size_t COVER_IMAGE_LIMIT  = 256 * 1024;
 constexpr size_t MUSICBRAINZ_CANDIDATE_LIMIT = 6;
 constexpr uint32_t REQUEST_SETTLE_MS = 3000;
 constexpr uint32_t MUSICBRAINZ_INTERVAL_MS = 1100;
+constexpr uint32_t COVER_CONNECT_TIMEOUT_MS = 4000;
+constexpr uint32_t COVER_READ_TIMEOUT_MS = 4000;
 constexpr char HTTP_USER_AGENT[] =
     "FusionEdge/" FW_VERSION " (https://github.com/SimZs/FusionEdge)";
 
@@ -85,6 +87,38 @@ class PsramBufferStream : public Stream {
     size_t   _capacity;
     size_t   _size = 0;
     uint8_t* _data;
+};
+
+class CooperativeNetworkClient : public NetworkClient {
+  public:
+    int available() override {
+        _serviceIdle();
+        return NetworkClient::available();
+    }
+
+    int read() override {
+        _serviceIdle();
+        uint8_t value = 0;
+        const int result = NetworkClient::read(&value, 1);
+        if (result < 0) return result;
+        return result == 0 ? -1 : value;
+    }
+
+    int read(uint8_t* buffer, size_t size) override {
+        _serviceIdle();
+        return NetworkClient::read(buffer, size);
+    }
+
+  private:
+    void _serviceIdle() {
+        // HTTPClient reads response headers byte-by-byte. A malformed or very
+        // long line can otherwise keep CPU0 away from IDLE0 until the task WDT
+        // fires. Blocking for one tick every few calls keeps the transfer
+        // cooperative without noticeably slowing normal headers or images.
+        if ((++_operationCount & 0x07U) == 0U) vTaskDelay(1);
+    }
+
+    uint8_t _operationCount = 0;
 };
 
 char* trim(char* text) {
@@ -361,10 +395,10 @@ bool httpGetToPsram(const String& url, size_t limit, uint8_t*& data, size_t& siz
             // Keep them off the network heap at the same time.
             DlnaHttpGuard dlnaHttpLock;
 #endif
-            NetworkClient plainClient;
+            CooperativeNetworkClient plainClient;
             HTTPClient http;
-            http.setConnectTimeout(6000);
-            http.setTimeout(8000);
+            http.setConnectTimeout(COVER_CONNECT_TIMEOUT_MS);
+            http.setTimeout(COVER_READ_TIMEOUT_MS);
             http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
             http.setRedirectLimit(4);
             http.setUserAgent(HTTP_USER_AGENT);
@@ -423,10 +457,10 @@ bool httpGetRedirectLocation(const String& url, String& location) {
 #ifdef USE_DLNA
     DlnaHttpGuard dlnaHttpLock;
 #endif
-    NetworkClient client;
+    CooperativeNetworkClient client;
     HTTPClient http;
-    http.setConnectTimeout(6000);
-    http.setTimeout(8000);
+    http.setConnectTimeout(COVER_CONNECT_TIMEOUT_MS);
+    http.setTimeout(COVER_READ_TIMEOUT_MS);
     http.setFollowRedirects(HTTPC_DISABLE_FOLLOW_REDIRECTS);
     http.setUserAgent(HTTP_USER_AGENT);
     if (!http.begin(client, url)) return false;
