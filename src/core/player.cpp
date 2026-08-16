@@ -575,6 +575,13 @@ void Player::playUrl(const char *url, const char *name) {
 void Player::_play(uint16_t stationId) {
   _hasError = false;
   acceptStreamMeta = false;
+  // A direct PR_PLAY (for example from WebUI) does not have a preceding
+  // PR_STOP. Stop the old transport before changing station metadata so the
+  // display and the audible stream cannot describe different stations if a
+  // protected network connection is delayed or cancelled.
+  if (isRunning()) {
+    stopSong();
+  }
   _status = STOPPED;
   setOutputPins(false);
   remoteStationName = false;

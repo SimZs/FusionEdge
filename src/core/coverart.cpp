@@ -21,8 +21,8 @@ constexpr size_t COVER_IMAGE_LIMIT  = 256 * 1024;
 constexpr size_t MUSICBRAINZ_CANDIDATE_LIMIT = 6;
 constexpr uint32_t REQUEST_SETTLE_MS = 3000;
 constexpr uint32_t MUSICBRAINZ_INTERVAL_MS = 1100;
-constexpr uint32_t COVER_CONNECT_TIMEOUT_MS = 4000;
-constexpr uint32_t COVER_READ_TIMEOUT_MS = 4000;
+constexpr uint32_t COVER_CONNECT_TIMEOUT_MS = 6000;
+constexpr uint32_t COVER_READ_TIMEOUT_MS = 8000;
 constexpr char HTTP_USER_AGENT[] =
     "FusionEdge/" FW_VERSION " (https://github.com/SimZs/FusionEdge)";
 
@@ -92,12 +92,12 @@ class PsramBufferStream : public Stream {
 class CooperativeNetworkClient : public NetworkClient {
   public:
     int available() override {
-        _serviceIdle();
+        if (!_serviceNetwork()) return 0;
         return NetworkClient::available();
     }
 
     int read() override {
-        _serviceIdle();
+        if (!_serviceNetwork()) return -1;
         uint8_t value = 0;
         const int result = NetworkClient::read(&value, 1);
         if (result < 0) return result;
@@ -105,20 +105,35 @@ class CooperativeNetworkClient : public NetworkClient {
     }
 
     int read(uint8_t* buffer, size_t size) override {
-        _serviceIdle();
+        if (!_serviceNetwork()) return -1;
         return NetworkClient::read(buffer, size);
     }
 
-  private:
-    void _serviceIdle() {
-        // HTTPClient reads response headers byte-by-byte. A malformed or very
-        // long line can otherwise keep CPU0 away from IDLE0 until the task WDT
-        // fires. Blocking for one tick every few calls keeps the transfer
-        // cooperative without noticeably slowing normal headers or images.
-        if ((++_operationCount & 0x07U) == 0U) vTaskDelay(1);
+    uint8_t connected() override {
+        if (!_serviceNetwork()) return 0;
+        return NetworkClient::connected();
     }
 
-    uint8_t _operationCount = 0;
+  private:
+    bool _serviceNetwork() {
+        if (coverArt.networkPaused()) {
+            NetworkClient::stop();
+            return false;
+        }
+
+        // HTTPClient reads response headers byte-by-byte. A malformed or very
+        // long line can otherwise keep CPU0 away from IDLE0 until the task WDT
+        // fires. Yield by elapsed time instead of operation count: yielding
+        // every few bytes made larger HTTP headers hit the read timeout.
+        const uint32_t now = millis();
+        if (now - _lastYieldMs >= 20U) {
+            _lastYieldMs = now;
+            vTaskDelay(1);
+        }
+        return true;
+    }
+
+    uint32_t _lastYieldMs = 0;
 };
 
 char* trim(char* text) {
@@ -378,6 +393,14 @@ String urlEncode(const char* value) {
     return result;
 }
 
+String requestHost(const String& url) {
+    const int schemeEnd = url.indexOf("://");
+    const int hostStart = schemeEnd >= 0 ? schemeEnd + 3 : 0;
+    int hostEnd = url.indexOf('/', hostStart);
+    if (hostEnd < 0) hostEnd = url.length();
+    return url.substring(hostStart, hostEnd);
+}
+
 bool httpGetToPsram(const String& url, size_t limit, uint8_t*& data, size_t& size,
                     uint8_t retries = 1) {
     data = nullptr;
@@ -420,11 +443,13 @@ bool httpGetToPsram(const String& url, size_t limit, uint8_t*& data, size_t& siz
                 retry = attempt < retries &&
                         (status == 429 || status == HTTP_CODE_SERVICE_UNAVAILABLE);
                 if (retry) {
-                    log_w("##[COVER]# HTTP request failed: %d, retrying once", status);
+                    log_w("##[COVER]# HTTP request failed host=%s status=%d, retrying once",
+                          requestHost(url).c_str(), status);
                 } else if (status == HTTP_CODE_NOT_FOUND) {
                     log_d("##[COVER]# resource not found: %d", status);
                 } else {
-                    log_w("##[COVER]# HTTP request failed: %d", status);
+                    log_w("##[COVER]# HTTP request failed host=%s status=%d",
+                          requestHost(url).c_str(), status);
                 }
                 http.end();
             } else {
@@ -495,7 +520,8 @@ bool httpGetRedirectLocation(const String& url, String& location) {
         if (status == HTTP_CODE_NOT_FOUND) {
             log_d("##[COVER]# CAA has no cover: %d", status);
         } else {
-            log_w("##[COVER]# CAA redirect failed: %d", status);
+            log_w("##[COVER]# CAA redirect failed host=%s status=%d",
+                  requestHost(url).c_str(), status);
         }
         location = "";
         return false;
@@ -503,8 +529,27 @@ bool httpGetRedirectLocation(const String& url, String& location) {
     return true;
 }
 
-bool extractAlbumMbid(const uint8_t* jsonData, size_t jsonSize, char* mbid, size_t mbidSize) {
+int lastFmImageRank(const char* size) {
+    if (!size) return 0;
+    if (strcmp(size, "mega") == 0) return 5;
+    if (strcmp(size, "extralarge") == 0) return 4;
+    if (strcmp(size, "large") == 0) return 3;
+    if (strcmp(size, "medium") == 0) return 2;
+    if (strcmp(size, "small") == 0) return 1;
+    return 0;
+}
+
+bool isLastFmPlaceholder(const char* url) {
+    if (!url) return true;
+    return strstr(url, "2a96cbd8b46e442fc41c2b86b821562f") != nullptr ||
+           strstr(url, "4128a6eb29f94943c9d206c08e625904") != nullptr;
+}
+
+bool extractLastFmAlbum(const uint8_t* jsonData, size_t jsonSize,
+                        char* mbid, size_t mbidSize,
+                        char* imageUrl, size_t imageUrlSize) {
     mbid[0] = '\0';
+    imageUrl[0] = '\0';
     cJSON* root = cJSON_ParseWithLength(reinterpret_cast<const char*>(jsonData), jsonSize);
     if (!root) return false;
 
@@ -514,20 +559,47 @@ bool extractAlbumMbid(const uint8_t* jsonData, size_t jsonSize, char* mbid, size
     if (cJSON_IsString(albumMbid) && albumMbid->valuestring) {
         strlcpy(mbid, albumMbid->valuestring, mbidSize);
     }
+
+    cJSON* images = cJSON_IsObject(album)
+                        ? cJSON_GetObjectItemCaseSensitive(album, "image")
+                        : nullptr;
+    int bestRank = 0;
+    cJSON* image = nullptr;
+    cJSON_ArrayForEach(image, images) {
+        cJSON* text = cJSON_GetObjectItemCaseSensitive(image, "#text");
+        cJSON* size = cJSON_GetObjectItemCaseSensitive(image, "size");
+        if (!cJSON_IsString(text) || !text->valuestring || text->valuestring[0] == '\0' ||
+            isLastFmPlaceholder(text->valuestring)) {
+            continue;
+        }
+        const int rank = cJSON_IsString(size) ? lastFmImageRank(size->valuestring) : 1;
+        if (rank < bestRank) continue;
+
+        const char* rawUrl = text->valuestring;
+        if (strncmp(rawUrl, "https://", 8) == 0) {
+            snprintf(imageUrl, imageUrlSize, "http://%s", rawUrl + 8);
+        } else if (strncmp(rawUrl, "http://", 7) == 0) {
+            strlcpy(imageUrl, rawUrl, imageUrlSize);
+        } else {
+            continue;
+        }
+        bestRank = rank;
+    }
     cJSON_Delete(root);
 
     if (strlen(mbid) != 36) {
         mbid[0] = '\0';
-        return false;
-    }
-    for (size_t i = 0; i < 36; ++i) {
-        const bool separator = i == 8 || i == 13 || i == 18 || i == 23;
-        if ((separator && mbid[i] != '-') || (!separator && !isxdigit(static_cast<unsigned char>(mbid[i])))) {
-            mbid[0] = '\0';
-            return false;
+    } else {
+        for (size_t i = 0; i < 36; ++i) {
+            const bool separator = i == 8 || i == 13 || i == 18 || i == 23;
+            if ((separator && mbid[i] != '-') ||
+                (!separator && !isxdigit(static_cast<unsigned char>(mbid[i])))) {
+                mbid[0] = '\0';
+                break;
+            }
         }
     }
-    return true;
+    return mbid[0] != '\0' || imageUrl[0] != '\0';
 }
 
 bool artistMatches(const char* expected, const char* candidate) {
@@ -828,11 +900,34 @@ bool fetchExactCover(const char* artist, const char* title, uint8_t*& imageData,
     uint8_t* jsonData = nullptr;
     size_t jsonSize = 0;
     char albumMbid[40];
+    char lastFmImageUrl[512];
     bool haveLastFmMbid = false;
     if (httpGetToPsram(apiUrl, API_RESPONSE_LIMIT, jsonData, jsonSize)) {
-        haveLastFmMbid = extractAlbumMbid(jsonData, jsonSize, albumMbid, sizeof(albumMbid));
+        extractLastFmAlbum(jsonData, jsonSize, albumMbid, sizeof(albumMbid),
+                           lastFmImageUrl, sizeof(lastFmImageUrl));
+        haveLastFmMbid = albumMbid[0] != '\0';
         free(jsonData);
         jsonData = nullptr;
+
+        if (lastFmImageUrl[0] != '\0' &&
+            httpGetToPsram(lastFmImageUrl, COVER_IMAGE_LIMIT,
+                           imageData, imageSize, 0)) {
+            if (detectImage(imageData, imageSize, jpeg)) {
+                uint8_t* compact = static_cast<uint8_t*>(ps_malloc(imageSize));
+                if (compact) {
+                    memcpy(compact, imageData, imageSize);
+                    free(imageData);
+                    imageData = compact;
+                }
+                log_d("##[COVER]# using Last.fm album image");
+                return true;
+            }
+            free(imageData);
+            imageData = nullptr;
+            imageSize = 0;
+        }
+        if (coverArt.networkPaused()) return false;
+
         if (haveLastFmMbid &&
             fetchCoverArchive(albumMbid, false, imageData, imageSize, jpeg)) {
             return true;

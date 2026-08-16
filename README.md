@@ -20,6 +20,10 @@ maintenance.
   switching between DLNA and WEB playlists
 - Improved HTTPS stream reliability by coordinating CoverArt, DLNA and audio
   network operations and reducing internal-memory pressure
+- Fetches the largest available Last.fm album image directly, with MusicBrainz
+  and Cover Art Archive retained as fallbacks
+- Gives stream changes priority over background cover downloads, preventing a
+  new station name from appearing while the previous station keeps playing
 - Improved stream-stall and Wi-Fi reconnection recovery while preserving the
   user's playback intent
 - Fixed WebUI file-serving races that could crash `player.html` or leave the
@@ -117,13 +121,13 @@ following to `myoptions.h`:
 ```
 
 The lookup runs in a low-priority background task and only starts when metadata
-contains both an artist and a title in `Artist - Title` form. Last.fm
-`track.getInfo` with autocorrection resolves the album's MusicBrainz ID; the
-250-pixel front image is then retrieved from the Cover Art Archive. If Last.fm
-does not return an album ID, FusionEdge searches MusicBrainz for a matching
-release group. Images are kept in PSRAM and are not written to LittleFS. While
-a cover is unavailable, downloading or invalid, the normal station or source
-icon remains visible.
+contains both an artist and a title in `Artist - Title` form. FusionEdge first
+uses the largest album image returned by Last.fm `track.getInfo`. If Last.fm
+does not provide a usable image, it uses the album MusicBrainz ID or searches
+MusicBrainz for a matching release group before checking Cover Art Archive.
+Images are kept in PSRAM and are not written to LittleFS. While a cover is
+unavailable, downloading or invalid, the normal station or source icon remains
+visible.
 
 Bluetooth metadata receives an additional fallback for video services. If the
 QCC artist field contains a channel name and the exact lookup fails, FusionEdge
