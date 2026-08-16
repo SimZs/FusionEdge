@@ -5,6 +5,13 @@
 #include "sdmanager.h"
 #include "netserver.h"
 #include "timekeeper.h"
+#ifdef USE_LASTFM_COVER
+  #include "coverart.h"
+#endif
+#ifdef USE_DLNA
+  #include "../dlna/dlna_http_guard.h"
+#endif
+#include <esp_heap_caps.h>
 #include "../displays/tools/language.h"
 #include "../pluginsManager/pluginsManager.h"
 #ifdef USE_NEXTION
@@ -55,18 +62,25 @@ float playerVolumeCurveDb(float t) {
 } // namespace
 
   #if !I2S_INTERNAL
-Player::Player() {}
+Player::Player() : _audioClientMutex(nullptr) {}
   #else
-Player::Player() : Audio(true, I2S_DAC_CHANNEL_BOTH_EN) {}
+Player::Player() : Audio(true, I2S_DAC_CHANNEL_BOTH_EN), _audioClientMutex(nullptr) {}
   #endif
 //#endif
 
 void Player::init() {
   Serial.print("##[BOOT]#\tplayer.init\t");
+  if (_audioClientMutex == nullptr) {
+    _audioClientMutex = xSemaphoreCreateMutex();
+    if (_audioClientMutex == nullptr) {
+      log_e("##[PLAYER]# audio client mutex allocation failed");
+    }
+  }
   playerQueue = NULL;
   _resumeFilePos = 0;
   _hasError = false;
   _transitionInProgress = false;
+  _playRequested = false;
   playerQueue = xQueueCreate(5, sizeof(playerRequestParams_t));
   if (MUTE_PIN != 255) {
     pinMode(MUTE_PIN, OUTPUT);
@@ -251,6 +265,9 @@ void Player::loop() {
   if (playerQueue == NULL) {
     return;
   }
+  if (_audioClientMutex != nullptr) {
+    xSemaphoreTake(_audioClientMutex, portMAX_DELAY);
+  }
   playerRequestParams_t requestP;
   if (xQueueReceive(playerQueue, &requestP, isRunning() ? PL_QUEUE_TICKS : PL_QUEUE_TICKS_ST)) {
     switch (requestP.type) {
@@ -270,6 +287,7 @@ void Player::loop() {
           _transitionInProgress = false;
           break;
         }
+        _playRequested = false;
         _stop();
         _transitionInProgress = false;
         break;
@@ -277,6 +295,7 @@ void Player::loop() {
       case PR_PLAY:
       {
         _transitionInProgress = true;
+        _playRequested = true;
         uint16_t st = (uint16_t)abs(requestP.payload);
 
         // Ha gyorsan egymás után több PR_PLAY parancs érkezik, csak a legutolsót
@@ -362,6 +381,7 @@ void Player::loop() {
       case PR_URL:
       {
         _transitionInProgress = true;
+        _playRequested = true;
         // Play arbitrary URL (presets)
         _hasError = false;
         acceptStreamMeta = false;
@@ -395,7 +415,7 @@ void Player::loop() {
         setOutputPins(false);
         config.setTitle(LANG::const_PlConnect);
 
-        if (connecttohost(config.station.url)) {
+        if (_connectToHostProtected(config.station.url)) {
           _status = PLAYING;
           config.setTitle("");
           netserver.requestOnChange(MODE, 0);
@@ -444,6 +464,9 @@ if (
 ) {
   Serial.println("[SD] EOF -> next()");
   next();
+  if (_audioClientMutex != nullptr) {
+    xSemaphoreGive(_audioClientMutex);
+  }
   return;
 }
 #endif
@@ -460,6 +483,69 @@ if (
     browseUrl();
   }
 #endif*/
+  if (_audioClientMutex != nullptr) {
+    xSemaphoreGive(_audioClientMutex);
+  }
+}
+
+bool Player::connecttospeech(const char* speech, const char* lang) {
+  if (_audioClientMutex == nullptr) {
+    return Audio::connecttospeech(speech, lang);
+  }
+
+  const uint32_t waitStarted = millis();
+  xSemaphoreTake(_audioClientMutex, portMAX_DELAY);
+  const uint32_t waitedMs = millis() - waitStarted;
+  if (waitedMs >= 10) {
+    log_i("##[TTSDIAG]# waited %lu ms for audio client", (unsigned long)waitedMs);
+  }
+#ifdef USE_LASTFM_COVER
+  const bool coverIdle = coverArt.pauseNetwork();
+#else
+  constexpr bool coverIdle = true;
+#endif
+  bool connected = false;
+  if (coverIdle) {
+#ifdef USE_DLNA
+    DlnaHttpGuard networkLock;
+#endif
+    connected = Audio::connecttospeech(speech, lang);
+  }
+#ifdef USE_LASTFM_COVER
+  coverArt.resumeNetwork();
+#endif
+  xSemaphoreGive(_audioClientMutex);
+  return connected;
+}
+
+bool Player::_connectToHostProtected(const char* url) {
+#ifdef USE_LASTFM_COVER
+  const bool coverIdle = coverArt.pauseNetwork();
+#else
+  constexpr bool coverIdle = true;
+#endif
+  bool connected = false;
+  if (coverIdle) {
+#ifdef USE_DLNA
+    DlnaHttpGuard networkLock;
+#endif
+    // Let destroyed HTTPClient/NetworkClient objects coalesce their internal
+    // heap blocks before the TLS handshake asks for a large contiguous block.
+    vTaskDelay(1);
+    const size_t largestBefore =
+        heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    connected = Audio::connecttohost(url);
+    log_i("##[PLAYER]# connect result=%d internalLargest=%u->%u", connected,
+          static_cast<unsigned>(largestBefore),
+          static_cast<unsigned>(
+              heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)));
+  } else {
+    log_w("##[PLAYER]# connect deferred: cover network did not stop");
+  }
+#ifdef USE_LASTFM_COVER
+  coverArt.resumeNetwork();
+#endif
+  return connected;
 }
 
 void Player::setOutputPins(bool isPlaying) {
@@ -513,7 +599,7 @@ void Player::_play(uint16_t stationId) {
     }
   }
   if (config.getMode() == PM_WEB) {
-    isConnected = connecttohost(config.station.url);
+    isConnected = _connectToHostProtected(config.station.url);
   }
   connproc = true;
   // ----- START PLAYING -----
@@ -542,7 +628,7 @@ void Player::browseUrl() {
   display.putRequest(PSTOP);
   setOutputPins(false);
   config.setTitle(LANG::const_PlConnect);
-  if (connecttohost(burl)) {
+  if (_connectToHostProtected(burl)) {
     _status = PLAYING;
     config.setTitle("");
     netserver.requestOnChange(MODE, 0);

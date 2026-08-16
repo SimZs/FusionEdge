@@ -27,9 +27,18 @@
 #endif
 #include "core/audiohandlers.h" //"audio_change"
 #ifdef USE_DLNA                 // DLNA mod
+#    include <LittleFS.h>
 #    include "dlna/dlna_service.h"
 #    include "dlna/dlna_worker.h"
 extern volatile bool g_dlnaPlaylistDirty;
+
+static uint16_t littleFsIndexLength(const char* path) {
+    File index = LittleFS.open(path, "r");
+    if (!index) return 0;
+    const uint16_t count = (uint16_t)(index.size() / sizeof(uint32_t));
+    index.close();
+    return count;
+}
 #endif
 #if USE_OTA
 #    if ESP_ARDUINO_VERSION >= ESP_ARDUINO_VERSION_VAL(3, 0, 0)
@@ -287,12 +296,62 @@ void loop() {
     timekeeper.loop1();
 
 #ifdef USE_DLNA
+    if (g_webPlaylistActivatePending) {
+        g_webPlaylistActivatePending = false;
+        config.indexPlaylist();
+
+        const uint8_t oldSource = config.store.playlistSource;
+        config.store.playlistSource = (uint8_t)PL_SRC_WEB;
+        const uint16_t stationCount = littleFsIndexLength(INDEX_PATH);
+
+        if (stationCount == 0) {
+            config.store.playlistSource = oldSource;
+            config.resumeAfterModeChange = false;
+            log_e("##[DLNA]# WEB activation failed: playlist has no valid entries");
+        } else {
+            uint16_t station = config.store.lastStation;
+            if (station == 0 || station > stationCount) {
+                station = 1;
+                config.saveValue(&config.store.lastStation, station);
+            }
+            config.saveValue(&config.store.playlistSource, (uint8_t)PL_SRC_WEB);
+
+            if (config.getMode() != PM_WEB) {
+                config.changeMode(PM_WEB);
+            } else {
+                config.loadStation(station);
+                if (player_on_station_change) {
+                    player_on_station_change();
+                }
+            }
+
+            display.purgeQueuedRequestType(NEWMODE);
+            display.purgeQueuedRequestType(NEWSTATION);
+            display.putRequest(NEWMODE, PLAYER);
+            display.putRequest(NEWSTATION);
+            netserver.resetQueue();
+            netserver.requestOnChange(GETINDEX, 0);
+            netserver.requestOnChange(GETPLAYERMODE, 0);
+
+            if (config.resumeAfterModeChange) {
+                Serial.printf("[DLNA] Resume playback with WEB playlist, station=%u\n", station);
+                player.sendCommand({PR_PLAY, (int)station});
+            }
+            config.resumeAfterModeChange = false;
+            log_i("##[DLNA]# WEB playlist activated: stations=%u current=%u",
+                  (unsigned)stationCount, (unsigned)station);
+        }
+    }
+
     // DLNA build/append után runtime playlist refresh (main context-ben!)
     static uint32_t dlnaReloadAt = 0;
 
     if (g_dlnaPlaylistDirty) {
         g_dlnaPlaylistDirty = false;
-        dlnaReloadAt = millis() + 150; // kis debounce/flush idő LittleFS rename után
+        // An explicit "Use DLNA" request follows an already completed atomic
+        // upload, so it can be indexed immediately. Build/append keeps a short
+        // debounce for the worker's file handoff.
+        dlnaReloadAt = millis() + (g_dlnaPlaylistActivatePending ? 1 : 150);
     }
 
     if (dlnaReloadAt && (int32_t)(millis() - dlnaReloadAt) >= 0) {
@@ -300,6 +359,50 @@ void loop() {
 
         // újratölti a playlist/index cache-t → playlistLength() innentől nem 0
         config.indexDLNAPlaylist();
+
+        if (g_dlnaPlaylistActivatePending) {
+            g_dlnaPlaylistActivatePending = false;
+
+            const uint8_t oldSource = config.store.playlistSource;
+            config.store.playlistSource = (uint8_t)PL_SRC_DLNA;
+            const uint16_t stationCount = littleFsIndexLength(INDEX_DLNA_PATH);
+
+            if (stationCount == 0) {
+                config.store.playlistSource = oldSource;
+                config.resumeAfterModeChange = false;
+                log_e("##[DLNA]# activation failed: uploaded playlist has no valid entries");
+            } else {
+                uint16_t station = config.store.lastDlnaStation;
+                if (station == 0 || station > stationCount) {
+                    station = 1;
+                    config.saveValue(&config.store.lastDlnaStation, station);
+                }
+                config.saveValue(&config.store.playlistSource, (uint8_t)PL_SRC_DLNA);
+
+                if (config.getMode() != PM_WEB) {
+                    config.changeMode(PM_WEB);
+                } else {
+                    config.loadStation(station);
+                    if (player_on_station_change) {
+                        player_on_station_change();
+                    }
+                }
+
+                display.purgeQueuedRequestType(NEWMODE);
+                display.purgeQueuedRequestType(NEWSTATION);
+                display.putRequest(NEWMODE, PLAYER);
+                display.putRequest(NEWSTATION);
+                netserver.requestOnChange(GETPLAYERMODE, 0);
+
+                if (config.resumeAfterModeChange) {
+                    Serial.printf("[DLNA] Resume playback with DLNA playlist, station=%u\n", station);
+                    player.sendCommand({PR_PLAY, (int)station});
+                }
+                config.resumeAfterModeChange = false;
+                log_i("##[DLNA]# playlist activated: stations=%u current=%u",
+                      (unsigned)stationCount, (unsigned)station);
+            }
+        }
 
         // WebUI/index frissítés
         netserver.resetQueue();

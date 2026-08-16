@@ -40,10 +40,13 @@ private:
 private:
   void _stop(bool alreadyStopped = false);
   void _play(uint16_t stationId);
+  bool _connectToHostProtected(const char* url);
   void _loadVol();
   int8_t uiToDb(int8_t uiVal);
   bool _hasError;
   volatile bool _transitionInProgress;
+  volatile bool _playRequested;
+  SemaphoreHandle_t _audioClientMutex;
   // Buffers for PR_URL request
   // (fixed sizes to avoid dependency on BUFLEN macro)
   char _urlBuf[512];
@@ -62,6 +65,7 @@ public:
   Player();
   void init();
   void loop();
+  bool connecttospeech(const char* speech, const char* lang);
   void initHeaders(const char *file);
   void setError();
   void setError(const char *e);
@@ -73,6 +77,7 @@ public:
   void resetVolumeCurveDbLut();
   bool sendCommandNoWait(playerRequestParams_t request);
   bool readyForWebStation() const;
+  bool wantsPlayback() const { return _playRequested; }
   void resetQueue();
 #ifdef MQTT_ROOT_TOPIC
   void browseUrl();

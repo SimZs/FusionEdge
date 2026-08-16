@@ -270,24 +270,36 @@ bool CommandHandler::exec(const char* command, const char* value, uint8_t cid) {
     }
     /***** AUTO FADE *****/
     if (cmd.strEquals(command, "fadeenabled")) {
-        config.saveValue(&config.store.fadeEnabled, static_cast<uint8_t>(atoi(value)), true, false);
+        const uint8_t enabled = atoi(value) ? 1 : 0;
+        config.saveValue(&config.store.fadeEnabled, enabled, true, false);
+#if BRIGHTNESS_PIN != 255
+        backlightPlugin.setEnabled(enabled != 0);
+#endif
         display.putRequest(INVALIDATETHEMEWIDGETS);
         return true;
     }
     if (cmd.strEquals(command, "fadestartdelay")) {
-        config.saveValue(&config.store.fadeStartDelay, static_cast<uint16_t>(atoi(value)), true, false);
+        const uint16_t delaySec = constrain(atoi(value), 5, 3600);
+        config.saveValue(&config.store.fadeStartDelay, delaySec, true, false);
+#if BRIGHTNESS_PIN != 255
+        if (config.store.fadeEnabled) backlightPlugin.setEnabled(true);
+#endif
         return true;
     }
     if (cmd.strEquals(command, "fadetarget")) {
-        uint8_t target = atoi(value);
-        if (target > 100) target = 100;
+        const uint8_t target = constrain(atoi(value), 0, 100);
         config.saveValue(&config.store.fadeTarget, target, true, false);
+#if BRIGHTNESS_PIN != 255
+        if (config.store.fadeEnabled) backlightPlugin.setEnabled(true);
+#endif
         return true;
     }
     if (cmd.strEquals(command, "fadestep")) {
-        uint8_t step = atoi(value);
-        if (step > 100) step = 100;
+        uint8_t step = constrain(atoi(value), 1, 100);
         config.saveValue(&config.store.fadeStep, step, true, false);
+#if BRIGHTNESS_PIN != 255
+        if (config.store.fadeEnabled) backlightPlugin.setEnabled(true);
+#endif
         return true;
     }
     /*********************/

@@ -6,6 +6,7 @@
 #include "dlna_service.h"
 #include <LittleFS.h>
 #include "esp_task_wdt.h"
+#include <esp_heap_caps.h>
 #include "dlna_index.h"
 #include "dlna_http_guard.h" 
 
@@ -17,6 +18,8 @@ static TaskHandle_t s_workerTask = nullptr;
 static uint32_t s_playlistVer = 1;
 
 volatile bool g_dlnaPlaylistDirty = false;
+volatile bool g_dlnaPlaylistActivatePending = false;
+volatile bool g_webPlaylistActivatePending = false;
 
 uint32_t dlna_playlist_version() { return s_playlistVer; }
 
@@ -311,6 +314,14 @@ else if (j.type == DJ_INIT) {
 }
 
     worker_yield();
+
+    static UBaseType_t lowestStackRemaining = static_cast<UBaseType_t>(-1);
+    const UBaseType_t stackRemaining = uxTaskGetStackHighWaterMark(nullptr);
+    if (stackRemaining < lowestStackRemaining) {
+      lowestStackRemaining = stackRemaining;
+      log_i("##[DLNA]# worker stack minimum remaining=%u bytes",
+            static_cast<unsigned>(stackRemaining));
+    }
   }
 }
 
@@ -322,20 +333,23 @@ void dlna_worker_start() {
   if (!g_littlefsMux) g_littlefsMux = xSemaphoreCreateMutex();
   if (!g_dlnaQueue) g_dlnaQueue = xQueueCreate(6, sizeof(DlnaJob));
 
+  const size_t internalLargestBefore =
+      heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+  // This task opens LittleFS files. Flash reads disable the cache briefly, so
+  // its active stack must remain in internal RAM. The previous 24 KB reserve
+  // was unnecessarily large; 12 KB keeps TLS/WebUI headroom while the runtime
+  // high-water mark below verifies the real margin.
   BaseType_t ok = xTaskCreatePinnedToCore(
-    dlna_worker_task,
-    "dlna_worker",
-    24 * 1024,     // 12KB elég (ha kell, később feljebb)
-    nullptr,
-    0,             // background network work; keep CPU0 idle/WDT serviceable
-    &s_workerTask,
-    0              // !!! CORE0 (nálad core1 halál)
-  );
+    dlna_worker_task, "dlna_worker", 12 * 1024, nullptr, 0, &s_workerTask, 0);
 
   if (ok != pdPASS) {
     s_workerTask = nullptr;
     Serial.println("[DLNA] worker task create FAILED");
   } else {
+    log_i("##[DLNA]# worker ready (stack=internal/12KB, internal largest=%u->%u)",
+          static_cast<unsigned>(internalLargestBefore),
+          static_cast<unsigned>(heap_caps_get_largest_free_block(
+              MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)));
     Serial.println("[DLNA] worker task started");
   }
 }

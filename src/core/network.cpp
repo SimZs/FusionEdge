@@ -59,7 +59,9 @@ void MyNetwork::WiFiLostConnection(WiFiEvent_t event, WiFiEventInfo_t info) {
             network.status = SDREADY;
             display.putRequest(NEWIP, 0);
         } else {
-            network.lostPlaying = player.isRunning();
+            // AudioI2S may drop isRunning() before the Wi-Fi event reaches us.
+            // Preserve the user's play intent so reconnect can still resume.
+            network.lostPlaying = player.isRunning() || player.wantsPlayback();
             if (network.lostPlaying) {
                 player.lockOutput = true;
                 player.sendCommand({PR_STOP, 0});

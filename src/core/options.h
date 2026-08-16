@@ -2,7 +2,7 @@
 #define options_h
 #pragma once
 
-#define FW_VERSION "1.0.5"
+#define FW_VERSION "1.0.6"
 
 #ifndef THEME_CSV_VERSION
 #    define THEME_CSV_VERSION "0.0.1"
@@ -503,6 +503,15 @@ STORE YOUR SETTINGS IN THE *** myoptions.h *** FILE.
 #endif
 #ifndef LEDSTRIP_PIN
   #define LEDSTRIP_PIN  48
+#endif
+
+// A NeoPixel driver and the regular Arduino GPIO API cannot own the same pin.
+// Some ESP32-S3 board definitions expose GPIO48 as LED_BUILTIN while the
+// FusionEdge LED strip also defaults to GPIO48. In that configuration keep the
+// strip and disable only the built-in status LED operations.
+#if REAL_LEDBUILTIN == LEDSTRIP_PIN
+  #undef REAL_LEDBUILTIN
+  #define REAL_LEDBUILTIN 255
 #endif
 
 #ifndef COLOR_BUFF

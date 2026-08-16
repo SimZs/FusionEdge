@@ -547,6 +547,9 @@ bool NetServer::begin(bool quiet) {
   webserver.on("/dlna/init", HTTP_GET, [](AsyncWebServerRequest *request) {
     //DLNA modplus
 
+    // Opening dlna.html only discovers/browses the server. It must not alter
+    // playback; stop/resume belongs exclusively to the explicit playlist
+    // activation endpoints below.
     if (dlna_isReady() && LittleFS.exists(DLNA_LIST_JSON_PATH)) {
       request->send(200, "application/json", "{\"queued\":false,\"ready\":true}");
       return;
@@ -557,10 +560,6 @@ bool NetServer::begin(bool quiet) {
       return;
     }
 
-    config.resumeAfterModeChange = player.isRunning();
-    if (config.resumeAfterModeChange) {
-      player.sendCommand({PR_STOP, 0});
-    }
     //DLNA modplus
     DlnaJob j{};
     j.type = DJ_INIT;
@@ -790,8 +789,11 @@ bool NetServer::begin(bool quiet) {
         request->send(500, "application/json", "{\"ok\":false,\"msg\":\"rename failed\"}");
         return;
       }
+      // The browser can preview the uploaded CSV directly, but playback uses
+      // indexdlna.dat. Rebuild that index from the main loop, outside AsyncTCP.
+      g_dlnaPlaylistDirty = true;
       Serial.printf("[DLNA] loadplaylist: uploaded → %s\n", PLAYLIST_DLNA_PATH);
-      request->send(200, "application/json", "{\"ok\":true}");
+      request->send(200, "application/json", "{\"ok\":true,\"indexing\":true}");
     },
     nullptr,
     [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
@@ -809,80 +811,63 @@ bool NetServer::begin(bool quiet) {
   );
 
   webserver.on("/playlist/dlna", HTTP_GET, [](AsyncWebServerRequest *request) {
-    bool resume = config.resumeAfterModeChange;
-
-    config.store.playlistSource = PL_SRC_DLNA;
-    config.saveValue(&config.store.playlistSource, (uint8_t)PL_SRC_DLNA);
-
-  #ifdef USE_SD
-    if (config.getMode() == PM_SDCARD) {
-      config.changeMode(PM_WEB);
-    }
-  #endif
-
-    if (config.getMode() != PM_WEB) {
-      config.changeMode(PM_WEB);
-    } else {
-      config.loadStation(config.store.lastDlnaStation);
-
-      if (player_on_station_change)
-        player_on_station_change();
-      netserver.requestOnChange(GETINDEX, 0);
+    if (!LittleFS.exists(PLAYLIST_DLNA_PATH)) {
+      request->send(404, "text/plain", "No DLNA playlist available");
+      return;
     }
 
-    if (resume) {
-      Serial.println("[DLNA] Resume playback with DLNA playlist");
-      player.sendCommand({PR_PLAY, (int)config.store.lastDlnaStation});
+    config.resumeAfterModeChange = config.resumeAfterModeChange || player.isRunning();
+    if (player.isRunning()) {
+      player.sendCommand({PR_STOP, 0});
     }
 
-    config.resumeAfterModeChange = false;
-
-    netserver.requestOnChange(GETINDEX, 0);
-    netserver.requestOnChange(GETPLAYERMODE, 0);
-
-    request->send(200, "text/plain", "OK");
+    // Activation is completed after indexDLNAPlaylist() in the main loop.
+    // Running it here would block the AsyncTCP callback for large CSV files.
+    g_webPlaylistActivatePending = false;
+    g_dlnaPlaylistActivatePending = true;
+    g_dlnaPlaylistDirty = true;
+    Serial.printf("[DLNA] Activate uploaded playlist queued, resume=%d\n",
+                  config.resumeAfterModeChange ? 1 : 0);
+    request->send(202, "text/plain", "INDEXING");
   });
 
   webserver.on("/playlist/web", HTTP_GET, [](AsyncWebServerRequest *request) {
-    bool resume = config.resumeAfterModeChange;
-    config.resumeAfterModeChange = player.isRunning();
-    Serial.printf("[MODE] WEB enter, resume=%d\n", config.resumeAfterModeChange);
-
-    config.store.playlistSource = PL_SRC_WEB;
-    config.saveValue(&config.store.playlistSource, (uint8_t)PL_SRC_WEB);
-
-    if (config.getMode() != PM_WEB) {
-      config.changeMode(PM_WEB);
-    } else {
-      // nincs mode reset → csak visszatöltjük az indexet
-      config.loadStation(config.lastStation());
-
-      if (player_on_station_change) {
-        player_on_station_change();
-      }
-      netserver.requestOnChange(GETINDEX, 0);
+    config.resumeAfterModeChange = config.resumeAfterModeChange || player.isRunning();
+    if (player.isRunning()) {
+      player.sendCommand({PR_STOP, 0});
     }
 
-    if (resume) {
-      Serial.println("[DLNA] Resume playback after browser exit");
-      player.sendCommand({PR_PLAY, config.lastStation()});
-    }
-    config.resumeAfterModeChange = false;
-
-    netserver.requestOnChange(GETINDEX, 0);
-    netserver.requestOnChange(GETPLAYERMODE, 0);
-
-    request->send(200, "text/plain", "OK");
+    g_dlnaPlaylistActivatePending = false;
+    g_webPlaylistActivatePending = true;
+    Serial.printf("[DLNA] Activate WEB playlist queued, resume=%d\n",
+                  config.resumeAfterModeChange ? 1 : 0);
+    AsyncWebServerResponse *response = request->beginResponse(202, "text/plain", "SWITCHING");
+    response->addHeader("Cache-Control", "no-store, no-cache, must-revalidate");
+    request->send(response);
   });
 
 #endif
 
-  auto sendWebFile = [](AsyncWebServerRequest *request, const char *plainPath, const char *gzipPath, const char *contentType) {
-    if (LittleFS.exists(plainPath)) {
+  // Resolve optional plain/gzip variants once while the internal heap is
+  // still plentiful. Calling LittleFS.exists() for every browser asset opens
+  // extra VFS FILE objects and may abort under the tight heap of HTTPS audio.
+  const bool scriptPlain = LittleFS.exists("/www/script.js");
+  const bool scriptGzip = LittleFS.exists("/www/script.js.gz");
+  const bool stylePlain = LittleFS.exists("/www/style.css");
+  const bool styleGzip = LittleFS.exists("/www/style.css.gz");
+  const bool themePlain = LittleFS.exists("/www/theme.css");
+  const bool themeGzip = LittleFS.exists("/www/theme.css.gz");
+  const bool dragPlain = LittleFS.exists("/www/dragpl.js");
+  const bool dragGzip = LittleFS.exists("/www/dragpl.js.gz");
+
+  auto sendWebFile = [](AsyncWebServerRequest *request, const char *plainPath,
+                        const char *gzipPath, const char *contentType,
+                        bool plainAvailable, bool gzipAvailable) {
+    if (plainAvailable) {
       request->send(LittleFS, plainPath, contentType);
       return;
     }
-    if (LittleFS.exists(gzipPath)) {
+    if (gzipAvailable) {
       AsyncWebServerResponse *response = request->beginResponse(LittleFS, gzipPath, contentType);
       response->addHeader("Content-Encoding", "gzip");
       request->send(response);
@@ -892,30 +877,36 @@ bool NetServer::begin(bool quiet) {
   };
 
   // Explicit handlers for critical UI assets to avoid stalled static responses on some builds.
-  webserver.on("/script.js", HTTP_GET, [sendWebFile](AsyncWebServerRequest *request) {
-    sendWebFile(request, "/www/script.js", "/www/script.js.gz", "application/javascript");
+  webserver.on("/script.js", HTTP_GET, [sendWebFile, scriptPlain, scriptGzip](AsyncWebServerRequest *request) {
+    sendWebFile(request, "/www/script.js", "/www/script.js.gz", "application/javascript",
+                scriptPlain, scriptGzip);
   });
-  webserver.on("/style.css", HTTP_GET, [sendWebFile](AsyncWebServerRequest *request) {
-    sendWebFile(request, "/www/style.css", "/www/style.css.gz", "text/css");
+  webserver.on("/style.css", HTTP_GET, [sendWebFile, stylePlain, styleGzip](AsyncWebServerRequest *request) {
+    sendWebFile(request, "/www/style.css", "/www/style.css.gz", "text/css",
+                stylePlain, styleGzip);
   });
-  webserver.on("/theme.css", HTTP_GET, [sendWebFile](AsyncWebServerRequest *request) {
-    sendWebFile(request, "/www/theme.css", "/www/theme.css.gz", "text/css");
+  webserver.on("/theme.css", HTTP_GET, [sendWebFile, themePlain, themeGzip](AsyncWebServerRequest *request) {
+    sendWebFile(request, "/www/theme.css", "/www/theme.css.gz", "text/css",
+                themePlain, themeGzip);
   });
-  webserver.on("/dragpl.js", HTTP_GET, [sendWebFile](AsyncWebServerRequest *request) {
-    sendWebFile(request, "/www/dragpl.js", "/www/dragpl.js.gz", "application/javascript");
+  webserver.on("/dragpl.js", HTTP_GET, [sendWebFile, dragPlain, dragGzip](AsyncWebServerRequest *request) {
+    sendWebFile(request, "/www/dragpl.js", "/www/dragpl.js.gz", "application/javascript",
+                dragPlain, dragGzip);
   });
 
 #ifdef USE_DLNA
   // The DLNA browser and its firmware endpoints must stay in sync. Prevent a
   // cached older page from interpreting queued (202) worker replies as lists.
-  webserver.on("/dlna.html", HTTP_GET, [](AsyncWebServerRequest *request) {
+  const bool dlnaHtmlPlain = LittleFS.exists("/www/dlna.html");
+  const bool dlnaHtmlGzip = LittleFS.exists("/www/dlna.html.gz");
+  webserver.on("/dlna.html", HTTP_GET, [dlnaHtmlPlain, dlnaHtmlGzip](AsyncWebServerRequest *request) {
     const char *plainPath = "/www/dlna.html";
     const char *gzipPath = "/www/dlna.html.gz";
     AsyncWebServerResponse *response = nullptr;
 
-    if (LittleFS.exists(plainPath)) {
+    if (dlnaHtmlPlain) {
       response = request->beginResponse(LittleFS, plainPath, "text/html");
-    } else if (LittleFS.exists(gzipPath)) {
+    } else if (dlnaHtmlGzip) {
       response = request->beginResponse(LittleFS, gzipPath, "text/html");
       response->addHeader("Content-Encoding", "gzip");
     } else {
@@ -1249,35 +1240,28 @@ bool NetServer::begin(bool quiet) {
   return true;
 }
 
-size_t NetServer::chunkedHtmlPageCallback(uint8_t *buffer, size_t maxLen, size_t index) {
+static size_t readChunkedFile(const String &path, bool sdpl, uint8_t *buffer, size_t maxLen, size_t index) {
   File requiredfile;
-  bool sdpl = strcmp(netserver.chunkedPathBuffer, PLAYLIST_SD_PATH) == 0;
   if (sdpl) {
-    requiredfile = config.SDPLFS()->open(netserver.chunkedPathBuffer, "r");
+    // SD and the display may share the SPI bus. Keep the guard local to this
+    // callback so a cancelled HTTP response can never leave the display locked.
+    display.lock();
+    display.waitDMA();
+  }
+  if (sdpl) {
+    requiredfile = config.SDPLFS()->open(path, "r");
   } else {
-    requiredfile = LittleFS.open(netserver.chunkedPathBuffer, "r");
+    requiredfile = LittleFS.open(path, "r");
   }
   if (!requiredfile) {
-#ifdef USE_BLUETOOTH
-    if (config.getMode() != PM_BLUETOOTH) {
-#endif
-        display.unlock();
-#ifdef USE_BLUETOOTH
-    }
-#endif
+    if (sdpl) display.unlock();
     return 0;
   }
   size_t filesize = requiredfile.size();
-  size_t needread = filesize - index;
+  size_t needread = index < filesize ? filesize - index : 0;
   if (!needread) {
     requiredfile.close();
-#ifdef USE_BLUETOOTH
-    if (config.getMode() != PM_BLUETOOTH) {
-#endif
-        display.unlock();
-#ifdef USE_BLUETOOTH
-    }
-#endif
+    if (sdpl) display.unlock();
     return 0;
   }
 #ifdef MAX_PL_READ_BYTES
@@ -1286,34 +1270,25 @@ size_t NetServer::chunkedHtmlPageCallback(uint8_t *buffer, size_t maxLen, size_t
   }
 #endif
   size_t canread = (needread > maxLen) ? maxLen : needread;
-  DBGVB("[%s] seek to %d in %s and read %d bytes with maxLen=%d", __func__, index, netserver.chunkedPathBuffer, canread, maxLen);
+  DBGVB("[%s] seek to %d in %s and read %d bytes with maxLen=%d", __func__, index, path.c_str(), canread, maxLen);
   //netserver.loop();
   requiredfile.seek(index, SeekSet);
   requiredfile.read(buffer, canread);
-  index += canread;
   if (requiredfile) {
     requiredfile.close();
   }
+  if (sdpl) display.unlock();
   return canread;
 }
 
 void NetServer::chunkedHtmlPage(const String &contentType, AsyncWebServerRequest *request, const char *path) {
-  memset(chunkedPathBuffer, 0, sizeof(chunkedPathBuffer));
-  strlcpy(chunkedPathBuffer, path, sizeof(chunkedPathBuffer) - 1);
-  AsyncWebServerResponse *response;
-#ifndef NETSERVER_LOOP1
-  // BT módban a display.lock() KIHAGYVA: a chunkedHtmlPageCallback async
-  // kontextusban (WiFi task) hívja az unlock()-ot, de a lock() itt (main loop
-  // vagy async init task) fut → cross-task lock/unlock → display megfagy.
-#ifdef USE_BLUETOOTH
-  if (config.getMode() != PM_BLUETOOTH) {
-      display.lock();
-  }
-#else
-  display.lock();
-#endif
-#endif
-  response = request->beginChunkedResponse(contentType, chunkedHtmlPageCallback);
+  const String responsePath(path);
+  const bool sdpl = responsePath == PLAYLIST_SD_PATH;
+  AsyncWebServerResponse *response = request->beginChunkedResponse(
+      contentType,
+      [responsePath, sdpl](uint8_t *buffer, size_t maxLen, size_t index) -> size_t {
+        return readChunkedFile(responsePath, sdpl, buffer, maxLen, index);
+      });
   // FusionEdge: this function always serves dynamic LittleFS content
   // (playlist.csv, index files, etc. - see call sites), never long-lived
   // static assets. The previous max-age=31536000 (1 year) header caused

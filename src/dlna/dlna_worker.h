@@ -42,3 +42,5 @@ void dlna_status_setBusy(const DlnaJob& j, const char* msg);
 void dlna_status_setDone(const DlnaJob& j, bool ok, int err, const char* msg);
 uint32_t dlna_playlist_version();
 extern volatile bool g_dlnaPlaylistDirty;
+extern volatile bool g_dlnaPlaylistActivatePending;
+extern volatile bool g_webPlaylistActivatePending;

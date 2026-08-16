@@ -6,11 +6,41 @@
 #include <WiFiClient.h>
 #include <HTTPClient.h>
 
+namespace {
+class CooperativeDlnaClient : public WiFiClient {
+  public:
+    int available() override {
+      serviceIdle();
+      return WiFiClient::available();
+    }
+
+    int read() override {
+      serviceIdle();
+      uint8_t value = 0;
+      const int result = WiFiClient::read(&value, 1);
+      if (result < 0) return result;
+      return result == 0 ? -1 : value;
+    }
+
+    int read(uint8_t* buffer, size_t size) override {
+      serviceIdle();
+      return WiFiClient::read(buffer, size);
+    }
+
+  private:
+    void serviceIdle() {
+      if ((++operationCount & 0x0FU) == 0U) vTaskDelay(1);
+    }
+
+    uint8_t operationCount = 0;
+};
+} // namespace
+
 bool DlnaDescription::resolveControlURL(const String& descUrl, String& outControlUrl) {
   outControlUrl = "";
 
   HTTPClient http;
-  WiFiClient client;
+  CooperativeDlnaClient client;
 
   Serial.printf("[DLNA] GET %s\n", descUrl.c_str());
   
@@ -20,6 +50,9 @@ bool DlnaDescription::resolveControlURL(const String& descUrl, String& outContro
     Serial.println("[DLNA] HTTP begin failed");
     return false;
   }
+
+  http.setConnectTimeout(3000);
+  http.setTimeout(4000);
 
   int code = http.GET();
   if (code != HTTP_CODE_OK) {

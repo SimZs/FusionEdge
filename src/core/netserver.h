@@ -240,7 +240,6 @@ class NetServer {
   public:
     import_e importRequest;
     bool resumePlay;
-    char chunkedPathBuffer[40];
     char nsBuf[BUFLEN], nsBuf2[BUFLEN];
   public:
     NetServer() {};
@@ -266,7 +265,6 @@ class NetServer {
     uint32_t playerBufMax;
     void getPlaylist(uint8_t clientId);
     bool importPlaylist();
-    static size_t chunkedHtmlPageCallback(uint8_t* buffer, size_t maxLen, size_t index);
     void processQueue();
     int _readPlaylistLine(File &file, char * line, size_t size);
 };

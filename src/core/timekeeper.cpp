@@ -230,6 +230,7 @@ bool TimeKeeper::loop1() { // core1 (player)
     static uint32_t _stallSince = 0;
     static uint32_t _lastRestart = 0;
     static uint32_t _restartBackoffMs = 5000;
+    static bool     _stallLogged = false;
     if (currentTime - _last1s >= 1000) { // 1sec
         _last1s = currentTime;
         //   pm.on_ticker();
@@ -252,27 +253,59 @@ bool TimeKeeper::loop1() { // core1 (player)
     /*----- Stops playback in internet radio mode when the playback buffer runs out. Then restarts playback. -----*/
     if (currentTime - _lastStallCheck >= 1000) { // 1sec
         _lastStallCheck = currentTime;
-        if (config.store.stallWatchdog && player.isRunning() && config.getMode() == PM_WEB && network.status == CONNECTED && !player.lockOutput) {
-            uint32_t buf = player.inBufferFilled();
-            if (buf == 0) {
-                if (_stallSince == 0) { _stallSince = currentTime; }
+        const bool eligible = config.store.stallWatchdog
+                           && config.getMode() == PM_WEB
+                           && network.status == CONNECTED
+                           && !network.beginReconnect
+                           && !player.lockOutput
+                           && !config.isClockTTS
+                           && player.wantsPlayback();
+
+        if (eligible) {
+            const bool audioRunning = player.isRunning();
+            const uint32_t buffered = audioRunning ? player.inBufferFilled() : 0;
+            const bool stalled = !audioRunning || buffered == 0;
+
+            if (stalled) {
+                if (_stallSince == 0) {
+                    _stallSince = currentTime;
+                    _stallLogged = false;
+                }
+
+                const uint32_t faultDelayMs = audioRunning ? 12000UL : 6000UL;
+                if (!_stallLogged && currentTime - _stallSince >= faultDelayMs) {
+                    log_w("##[STALL]# detected reason=%s station=%u backoff=%lu ms",
+                          audioRunning ? "empty-buffer" : "audio-stopped",
+                          (unsigned)config.lastStation(),
+                          (unsigned long)_restartBackoffMs);
+                    _stallLogged = true;
+                }
+
+                if (currentTime - _stallSince >= faultDelayMs
+                    && currentTime - _lastRestart >= _restartBackoffMs
+                    && player.readyForWebStation()) {
+                    const uint16_t station = config.lastStation();
+                    log_w("##[STALL]# restarting station=%u", (unsigned)station);
+                    player.sendCommand({PR_STOP, 0});
+                    player.sendCommand({PR_PLAY, station});
+                    _lastRestart = currentTime;
+                    _restartBackoffMs = min<uint32_t>(_restartBackoffMs * 2, 60000UL);
+                    _stallSince = 0;
+                    _stallLogged = false;
+                }
             } else {
                 _stallSince = 0;
+                _lastRestart = 0;
                 _restartBackoffMs = 5000;
-            }
-
-            if (_stallSince > 0 && (currentTime - _stallSince) >= 12000) {
-                if (currentTime - _lastRestart >= _restartBackoffMs) {
-                    _lastRestart = currentTime;
-                    if (_restartBackoffMs < 60000) { _restartBackoffMs = min<uint32_t>(_restartBackoffMs * 2, 60000); }
-                    player.sendCommand({PR_STOP, 0});
-                    player.sendCommand({PR_PLAY, config.lastStation()});
-                    _stallSince = 0;
-                }
+                _stallLogged = false;
             }
         } else {
             _stallSince = 0;
-            _restartBackoffMs = 5000;
+            _stallLogged = false;
+            if (!player.wantsPlayback() || !config.store.stallWatchdog) {
+                _lastRestart = 0;
+                _restartBackoffMs = 5000;
+            }
         }
     }
 #if defined(DUMMYDISPLAY) && !defined(USE_NEXTION)

@@ -338,9 +338,9 @@ void makeBluetoothTrackSearch(const char* input, char* output, size_t outputSize
     if (clean != output) memmove(output, clean, strlen(clean) + 1);
 }
 
-bool makeLookupKey(const char* artist, const char* title, bool allowTitleSearch,
+bool makeLookupKey(const char* artist, const char* title, bool bluetoothTitleMode,
                    char* key, size_t keySize) {
-    if (!allowTitleSearch) {
+    if (!bluetoothTitleMode) {
         makeKey(artist, title, key, keySize);
         return key[0] != '\0';
     }
@@ -382,12 +382,14 @@ bool httpGetToPsram(const String& url, size_t limit, uint8_t*& data, size_t& siz
                     uint8_t retries = 1) {
     data = nullptr;
     size = 0;
+    if (coverArt.networkPaused()) return false;
     if (!url.startsWith("http://")) {
         log_w("##[COVER]# non-HTTP URL rejected to preserve audio TLS memory");
         return false;
     }
 
     for (uint8_t attempt = 0; attempt <= retries; ++attempt) {
+        if (coverArt.networkPaused()) return false;
         bool retry = false;
         {
 #ifdef USE_DLNA
@@ -395,6 +397,7 @@ bool httpGetToPsram(const String& url, size_t limit, uint8_t*& data, size_t& siz
             // Keep them off the network heap at the same time.
             DlnaHttpGuard dlnaHttpLock;
 #endif
+            if (coverArt.networkPaused()) return false;
             CooperativeNetworkClient plainClient;
             HTTPClient http;
             http.setConnectTimeout(COVER_CONNECT_TIMEOUT_MS);
@@ -409,11 +412,17 @@ bool httpGetToPsram(const String& url, size_t limit, uint8_t*& data, size_t& siz
             vTaskDelay(1);
             const int status = http.GET();
             vTaskDelay(1);
+            if (coverArt.networkPaused()) {
+                http.end();
+                return false;
+            }
             if (status != HTTP_CODE_OK) {
                 retry = attempt < retries &&
                         (status == 429 || status == HTTP_CODE_SERVICE_UNAVAILABLE);
                 if (retry) {
                     log_w("##[COVER]# HTTP request failed: %d, retrying once", status);
+                } else if (status == HTTP_CODE_NOT_FOUND) {
+                    log_d("##[COVER]# resource not found: %d", status);
                 } else {
                     log_w("##[COVER]# HTTP request failed: %d", status);
                 }
@@ -434,6 +443,7 @@ bool httpGetToPsram(const String& url, size_t limit, uint8_t*& data, size_t& siz
                 }
                 const int written = http.writeToStream(&sink);
                 http.end();
+                if (coverArt.networkPaused()) return false;
                 if (written < 0 || sink.size() == 0) {
                     log_w("##[COVER]# response read failed: %d", written);
                     return false;
@@ -445,6 +455,7 @@ bool httpGetToPsram(const String& url, size_t limit, uint8_t*& data, size_t& siz
             }
         }
         if (!retry) return false;
+        if (coverArt.networkPaused()) return false;
         vTaskDelay(pdMS_TO_TICKS(1500));
     }
     return false;
@@ -452,11 +463,13 @@ bool httpGetToPsram(const String& url, size_t limit, uint8_t*& data, size_t& siz
 
 bool httpGetRedirectLocation(const String& url, String& location) {
     location = "";
+    if (coverArt.networkPaused()) return false;
     if (!url.startsWith("http://")) return false;
 
 #ifdef USE_DLNA
     DlnaHttpGuard dlnaHttpLock;
 #endif
+    if (coverArt.networkPaused()) return false;
     CooperativeNetworkClient client;
     HTTPClient http;
     http.setConnectTimeout(COVER_CONNECT_TIMEOUT_MS);
@@ -468,6 +481,10 @@ bool httpGetRedirectLocation(const String& url, String& location) {
     vTaskDelay(1);
     const int status = http.GET();
     vTaskDelay(1);
+    if (coverArt.networkPaused()) {
+        http.end();
+        return false;
+    }
     const bool redirect = status == HTTP_CODE_MOVED_PERMANENTLY ||
                           status == HTTP_CODE_FOUND || status == HTTP_CODE_SEE_OTHER ||
                           status == HTTP_CODE_TEMPORARY_REDIRECT || status == 308;
@@ -475,7 +492,11 @@ bool httpGetRedirectLocation(const String& url, String& location) {
     http.end();
 
     if (!redirect || !location.startsWith("http://")) {
-        log_w("##[COVER]# CAA redirect failed: %d", status);
+        if (status == HTTP_CODE_NOT_FOUND) {
+            log_d("##[COVER]# CAA has no cover: %d", status);
+        } else {
+            log_w("##[COVER]# CAA redirect failed: %d", status);
+        }
         location = "";
         return false;
     }
@@ -509,9 +530,19 @@ bool extractAlbumMbid(const uint8_t* jsonData, size_t jsonSize, char* mbid, size
     return true;
 }
 
+bool artistMatches(const char* expected, const char* candidate) {
+    char normalizedExpected[128];
+    char normalizedCandidate[128];
+    normalizeKeyPart(expected, normalizedExpected, sizeof(normalizedExpected));
+    normalizeKeyPart(candidate, normalizedCandidate, sizeof(normalizedCandidate));
+    return normalizedExpected[0] != '\0' &&
+           strcmp(normalizedExpected, normalizedCandidate) == 0;
+}
+
 bool extractLastFmTrackMatch(const uint8_t* jsonData, size_t jsonSize,
-                             char* artist, size_t artistSize,
-                             char* title, size_t titleSize) {
+                              const char* requiredArtist,
+                              char* artist, size_t artistSize,
+                              char* title, size_t titleSize) {
     artist[0] = '\0';
     title[0] = '\0';
     cJSON* root = cJSON_ParseWithLength(reinterpret_cast<const char*>(jsonData), jsonSize);
@@ -524,26 +555,41 @@ bool extractLastFmTrackMatch(const uint8_t* jsonData, size_t jsonSize,
     cJSON* tracks = cJSON_IsObject(matches)
                         ? cJSON_GetObjectItemCaseSensitive(matches, "track")
                         : nullptr;
-    cJSON* track = cJSON_IsArray(tracks) ? cJSON_GetArrayItem(tracks, 0) : tracks;
-    cJSON* matchArtist = cJSON_IsObject(track)
-                             ? cJSON_GetObjectItemCaseSensitive(track, "artist")
-                             : nullptr;
-    cJSON* matchTitle = cJSON_IsObject(track)
-                            ? cJSON_GetObjectItemCaseSensitive(track, "name")
-                            : nullptr;
-    if (cJSON_IsString(matchArtist) && matchArtist->valuestring &&
-        cJSON_IsString(matchTitle) && matchTitle->valuestring) {
+    const int trackCount = cJSON_IsArray(tracks) ? cJSON_GetArraySize(tracks) : 1;
+    for (int index = 0; index < trackCount; ++index) {
+        cJSON* track = cJSON_IsArray(tracks) ? cJSON_GetArrayItem(tracks, index) : tracks;
+        cJSON* matchArtist = cJSON_IsObject(track)
+                                 ? cJSON_GetObjectItemCaseSensitive(track, "artist")
+                                 : nullptr;
+        cJSON* matchTitle = cJSON_IsObject(track)
+                                ? cJSON_GetObjectItemCaseSensitive(track, "name")
+                                : nullptr;
+        if (!cJSON_IsString(matchArtist) || !matchArtist->valuestring ||
+            !cJSON_IsString(matchTitle) || !matchTitle->valuestring) {
+            continue;
+        }
+        if (requiredArtist && !artistMatches(requiredArtist, matchArtist->valuestring)) {
+            continue;
+        }
         strlcpy(artist, matchArtist->valuestring, artistSize);
         strlcpy(title, matchTitle->valuestring, titleSize);
+        break;
     }
     cJSON_Delete(root);
     return artist[0] != '\0' && title[0] != '\0';
 }
 
-bool findLastFmTrackByTitle(const char* rawTitle, char* artist, size_t artistSize,
-                            char* title, size_t titleSize) {
+bool findLastFmTrackByTitle(const char* rawTitle, const char* requiredArtist,
+                             bool bluetoothTitleMode, char* artist, size_t artistSize,
+                             char* title, size_t titleSize) {
     char searchTitle[192];
-    makeBluetoothTrackSearch(rawTitle, searchTitle, sizeof(searchTitle));
+    if (bluetoothTitleMode) {
+        makeBluetoothTrackSearch(rawTitle, searchTitle, sizeof(searchTitle));
+    } else {
+        strlcpy(searchTitle, rawTitle ? rawTitle : "", sizeof(searchTitle));
+        char* clean = trim(searchTitle);
+        if (clean != searchTitle) memmove(searchTitle, clean, strlen(clean) + 1);
+    }
     if (searchTitle[0] == '\0') return false;
 
     String url = "http://ws.audioscrobbler.com/2.0/?method=track.search&format=json&limit=3&api_key=";
@@ -554,12 +600,12 @@ bool findLastFmTrackByTitle(const char* rawTitle, char* artist, size_t artistSiz
     uint8_t* jsonData = nullptr;
     size_t jsonSize = 0;
     if (!httpGetToPsram(url, API_RESPONSE_LIMIT, jsonData, jsonSize)) return false;
-    const bool found = extractLastFmTrackMatch(jsonData, jsonSize, artist, artistSize,
-                                               title, titleSize);
+    const bool found = extractLastFmTrackMatch(jsonData, jsonSize, requiredArtist,
+                                                artist, artistSize, title, titleSize);
     free(jsonData);
-    if (found) canonicalizeBluetoothTrackTitle(title);
+    if (found && bluetoothTitleMode) canonicalizeBluetoothTrackTitle(title);
     if (found && title[0] != '\0') {
-        log_i("##[COVER]# BT title search: '%s' -> '%s' - '%s'",
+        log_d("##[COVER]# title fallback: '%s' -> '%s' - '%s'",
               searchTitle, artist, title);
         return true;
     }
@@ -609,6 +655,7 @@ bool extractReleaseGroupMbids(const uint8_t* jsonData, size_t jsonSize,
 
 bool findMusicBrainzReleaseGroup(const char* artist, const char* title,
                                  MbidCandidates& candidates) {
+    if (coverArt.networkPaused()) return false;
     char searchArtist[128];
     char searchTitle[192];
     makeMusicBrainzSearchPart(artist, searchArtist, sizeof(searchArtist), false);
@@ -618,8 +665,14 @@ bool findMusicBrainzReleaseGroup(const char* artist, const char* title,
     const uint32_t now = millis();
     const uint32_t elapsed = now - lastMusicBrainzRequestMs;
     if (lastMusicBrainzRequestMs != 0 && elapsed < MUSICBRAINZ_INTERVAL_MS) {
-        vTaskDelay(pdMS_TO_TICKS(MUSICBRAINZ_INTERVAL_MS - elapsed));
+        uint32_t waitMs = MUSICBRAINZ_INTERVAL_MS - elapsed;
+        while (waitMs > 0 && !coverArt.networkPaused()) {
+            const uint32_t sliceMs = waitMs > 50 ? 50 : waitMs;
+            vTaskDelay(pdMS_TO_TICKS(sliceMs));
+            waitMs -= sliceMs;
+        }
     }
+    if (coverArt.networkPaused()) return false;
     lastMusicBrainzRequestMs = millis();
 
     String query = "recording:\"";
@@ -637,7 +690,7 @@ bool findMusicBrainzReleaseGroup(const char* artist, const char* title,
     const bool found = extractReleaseGroupMbids(jsonData, jsonSize, candidates);
     free(jsonData);
     if (found) {
-        log_i("##[COVER]# MusicBrainz release-group candidates: %u",
+        log_d("##[COVER]# MusicBrainz release-group candidates: %u",
               static_cast<unsigned>(candidates.count));
     }
     return found;
@@ -705,6 +758,7 @@ bool extractArchiveServers(const uint8_t* jsonData, size_t jsonSize,
 
 bool resolveArchiveUrls(const char* mbid, bool releaseGroup,
                         String& primaryUrl, String& secondaryUrl) {
+    if (coverArt.networkPaused()) return false;
     String caaUrl = "http://coverartarchive.org/";
     caaUrl += releaseGroup ? "release-group/" : "release/";
     caaUrl += mbid;
@@ -712,6 +766,7 @@ bool resolveArchiveUrls(const char* mbid, bool releaseGroup,
 
     String location;
     if (!httpGetRedirectLocation(caaUrl, location)) return false;
+    if (coverArt.networkPaused()) return false;
 
     String item;
     String filename;
@@ -733,6 +788,7 @@ bool resolveArchiveUrls(const char* mbid, bool releaseGroup,
 
 bool fetchCoverArchive(const char* mbid, bool releaseGroup, uint8_t*& imageData,
                        size_t& imageSize, bool& jpeg) {
+    if (coverArt.networkPaused()) return false;
     String primaryUrl;
     String secondaryUrl;
     if (!resolveArchiveUrls(mbid, releaseGroup, primaryUrl, secondaryUrl)) return false;
@@ -761,6 +817,7 @@ bool fetchCoverArchive(const char* mbid, bool releaseGroup, uint8_t*& imageData,
 
 bool fetchExactCover(const char* artist, const char* title, uint8_t*& imageData,
                      size_t& imageSize, bool& jpeg) {
+    if (coverArt.networkPaused()) return false;
     String apiUrl = "http://ws.audioscrobbler.com/2.0/?method=track.getInfo&autocorrect=1&format=json&api_key=";
     apiUrl += LASTFM_API_KEY;
     apiUrl += "&artist=";
@@ -780,21 +837,24 @@ bool fetchExactCover(const char* artist, const char* title, uint8_t*& imageData,
             fetchCoverArchive(albumMbid, false, imageData, imageSize, jpeg)) {
             return true;
         }
+        if (coverArt.networkPaused()) return false;
         if (!haveLastFmMbid) {
-            log_i("##[COVER]# Last.fm returned no album MBID, trying MusicBrainz");
+            log_d("##[COVER]# Last.fm returned no album MBID, trying MusicBrainz");
         } else {
-            log_i("##[COVER]# no release cover, trying MusicBrainz release-group");
+            log_d("##[COVER]# no release cover, trying MusicBrainz release-group");
         }
     } else {
-        log_i("##[COVER]# Last.fm unavailable, trying MusicBrainz");
+        log_d("##[COVER]# Last.fm unavailable, trying MusicBrainz");
     }
 
     MbidCandidates candidates;
+    if (coverArt.networkPaused()) return false;
     if (!findMusicBrainzReleaseGroup(artist, title, candidates)) {
         return false;
     }
     for (size_t i = 0; i < candidates.count; ++i) {
-        log_i("##[COVER]# trying release-group %u/%u: %s",
+        if (coverArt.networkPaused()) return false;
+        log_d("##[COVER]# trying release-group %u/%u: %s",
               static_cast<unsigned>(i + 1), static_cast<unsigned>(candidates.count),
               candidates.ids[i]);
         if (fetchCoverArchive(candidates.ids[i], true, imageData, imageSize, jpeg)) {
@@ -804,18 +864,21 @@ bool fetchExactCover(const char* artist, const char* title, uint8_t*& imageData,
     return false;
 }
 
-bool fetchCover(const char* artist, const char* title, bool allowTitleSearch,
-                uint8_t*& imageData, size_t& imageSize, bool& jpeg) {
+bool fetchCover(const char* artist, const char* title, bool bluetoothTitleMode,
+                 uint8_t*& imageData, size_t& imageSize, bool& jpeg) {
     if (fetchExactCover(artist, title, imageData, imageSize, jpeg)) return true;
-    if (!allowTitleSearch) return false;
+    if (coverArt.networkPaused()) return false;
 
     char matchedArtist[128];
     char matchedTitle[192];
-    if (!findLastFmTrackByTitle(title, matchedArtist, sizeof(matchedArtist),
-                               matchedTitle, sizeof(matchedTitle))) {
-        log_i("##[COVER]# BT title-only search found no track");
+    const char* requiredArtist = bluetoothTitleMode ? nullptr : artist;
+    if (!findLastFmTrackByTitle(title, requiredArtist, bluetoothTitleMode,
+                                matchedArtist, sizeof(matchedArtist),
+                                matchedTitle, sizeof(matchedTitle))) {
+        log_d("##[COVER]# title fallback found no safe track match");
         return false;
     }
+    if (coverArt.networkPaused()) return false;
 
     char originalKey[322];
     char matchedKey[322];
@@ -876,7 +939,7 @@ void CoverArtManager::begin() {
               heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)));
 }
 
-void CoverArtManager::requestCombined(const char* combinedTitle, bool allowTitleSearch) {
+void CoverArtManager::requestCombined(const char* combinedTitle, bool bluetoothTitleMode) {
     if (!_queue || !combinedTitle) return;
 
     Request request{};
@@ -885,7 +948,7 @@ void CoverArtManager::requestCombined(const char* combinedTitle, bool allowTitle
         xSemaphoreTake(_mutex, portMAX_DELAY);
         if (_currentKey[0] != '\0') {
             _currentKey[0] = '\0';
-            _currentAllowTitleSearch = false;
+            _currentBluetoothTitleMode = false;
             if (++_currentGeneration == 0) ++_currentGeneration;
             if (_readyData) free(_readyData);
             _readyData = nullptr;
@@ -896,8 +959,8 @@ void CoverArtManager::requestCombined(const char* combinedTitle, bool allowTitle
         xSemaphoreGive(_mutex);
         return;
     }
-    request.allowTitleSearch = allowTitleSearch;
-    if (!makeLookupKey(request.artist, request.title, request.allowTitleSearch,
+    request.bluetoothTitleMode = bluetoothTitleMode;
+    if (!makeLookupKey(request.artist, request.title, request.bluetoothTitleMode,
                        request.key, sizeof(request.key))) {
         // Values such as "Not Provided" are temporary BT metadata, not a new
         // track. Keep the current cover and do not enqueue a meaningless job.
@@ -906,12 +969,12 @@ void CoverArtManager::requestCombined(const char* combinedTitle, bool allowTitle
 
     xSemaphoreTake(_mutex, portMAX_DELAY);
     if (strcmp(_currentKey, request.key) == 0 &&
-        _currentAllowTitleSearch == request.allowTitleSearch) {
+        _currentBluetoothTitleMode == request.bluetoothTitleMode) {
         xSemaphoreGive(_mutex);
         return;
     }
     strlcpy(_currentKey, request.key, sizeof(_currentKey));
-    _currentAllowTitleSearch = request.allowTitleSearch;
+    _currentBluetoothTitleMode = request.bluetoothTitleMode;
     request.generation = ++_currentGeneration;
     if (_currentGeneration == 0) request.generation = ++_currentGeneration;
     if (_readyData) free(_readyData);
@@ -924,8 +987,51 @@ void CoverArtManager::requestCombined(const char* combinedTitle, bool allowTitle
     xQueueOverwrite(_queue, &request);
 }
 
-bool CoverArtManager::copyReadyFor(const char* combinedTitle, bool allowTitleSearch,
-                                   uint8_t*& data, size_t& size, bool& jpeg,
+bool CoverArtManager::pauseNetwork(uint32_t timeoutMs) {
+    if (!_mutex) return true;
+
+    xSemaphoreTake(_mutex, portMAX_DELAY);
+    _networkPaused = true;
+    bool active = _networkActive;
+    xSemaphoreGive(_mutex);
+
+    const uint32_t started = millis();
+    while (active && millis() - started < timeoutMs) {
+        vTaskDelay(pdMS_TO_TICKS(10));
+        xSemaphoreTake(_mutex, portMAX_DELAY);
+        active = _networkActive;
+        xSemaphoreGive(_mutex);
+    }
+    if (active) {
+        log_w("##[COVER]# network pause timed out after %lu ms",
+              static_cast<unsigned long>(millis() - started));
+        return false;
+    }
+    const uint32_t waited = millis() - started;
+    if (waited >= 10) {
+        log_d("##[COVER]# network paused for audio connect, waited=%lu ms",
+              static_cast<unsigned long>(waited));
+    }
+    return true;
+}
+
+void CoverArtManager::resumeNetwork() {
+    if (!_mutex) return;
+    xSemaphoreTake(_mutex, portMAX_DELAY);
+    _networkPaused = false;
+    xSemaphoreGive(_mutex);
+}
+
+bool CoverArtManager::networkPaused() {
+    if (!_mutex) return false;
+    xSemaphoreTake(_mutex, portMAX_DELAY);
+    const bool paused = _networkPaused;
+    xSemaphoreGive(_mutex);
+    return paused;
+}
+
+bool CoverArtManager::copyReadyFor(const char* combinedTitle, bool bluetoothTitleMode,
+                                    uint8_t*& data, size_t& size, bool& jpeg,
                                    uint32_t& generation) {
     data = nullptr;
     size = 0;
@@ -936,7 +1042,7 @@ bool CoverArtManager::copyReadyFor(const char* combinedTitle, bool allowTitleSea
     char title[TITLE_LEN];
     char key[KEY_LEN];
     if (!splitCombinedTitle(combinedTitle, artist, sizeof(artist), title, sizeof(title))) return false;
-    if (!makeLookupKey(artist, title, allowTitleSearch, key, sizeof(key))) return false;
+    if (!makeLookupKey(artist, title, bluetoothTitleMode, key, sizeof(key))) return false;
 
     xSemaphoreTake(_mutex, portMAX_DELAY);
     const bool matches = _readyData && _readySize > 0 && strcmp(_readyKey, key) == 0;
@@ -963,6 +1069,26 @@ bool CoverArtManager::_isCurrent(const Request& request) {
                          strcmp(request.key, _currentKey) == 0;
     xSemaphoreGive(_mutex);
     return current;
+}
+
+bool CoverArtManager::_beginNetworkRequest(const Request& request) {
+    for (;;) {
+        xSemaphoreTake(_mutex, portMAX_DELAY);
+        if (!_networkPaused) {
+            _networkActive = true;
+            xSemaphoreGive(_mutex);
+            return true;
+        }
+        xSemaphoreGive(_mutex);
+        if (!_isCurrent(request)) return false;
+        vTaskDelay(pdMS_TO_TICKS(20));
+    }
+}
+
+void CoverArtManager::_finishNetworkRequest() {
+    xSemaphoreTake(_mutex, portMAX_DELAY);
+    _networkActive = false;
+    xSemaphoreGive(_mutex);
 }
 
 void CoverArtManager::_publish(const Request& request, uint8_t* data, size_t size, bool jpeg) {
@@ -1004,13 +1130,20 @@ void CoverArtManager::_taskLoop() {
             log_w("##[COVER]# skipped, Wi-Fi is not connected");
             continue;
         }
+        if (!_beginNetworkRequest(request)) continue;
 
         uint8_t* data = nullptr;
         size_t size = 0;
         bool jpeg = false;
-        if (!fetchCover(request.artist, request.title, request.allowTitleSearch,
-                        data, size, jpeg)) {
-            log_i("##[COVER]# no cover: '%s' - '%s'", request.artist, request.title);
+        const bool found = fetchCover(request.artist, request.title,
+                                      request.bluetoothTitleMode, data, size, jpeg);
+        _finishNetworkRequest();
+        if (networkPaused()) {
+            if (data) free(data);
+            continue;
+        }
+        if (!found) {
+            log_d("##[COVER]# no cover: '%s' - '%s'", request.artist, request.title);
             continue;
         }
         _publish(request, data, size, jpeg);

@@ -18,6 +18,7 @@ class BacklightPlugin : public Plugin {
     bool isDimmed() const;
     bool isFading() const;
     bool isFadeControl();
+    void setEnabled(bool enabled);
     void wake();
     void activity();
     void setBacklight( uint8_t backLight );

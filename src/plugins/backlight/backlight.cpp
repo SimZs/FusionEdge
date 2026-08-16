@@ -46,18 +46,40 @@ void BacklightPlugin::activity() {
 void BacklightPlugin::setBacklight(uint8_t backLight) {
     #if BRIGHTNESS_PIN != 255
     if (!config.store.dspon) { display.wakeup(); }
-    Serial.printf("##FADE -> %3d %%\n", backLight);
     display.setBrightnessPercent(backLight);
     if (!config.store.dspon) { config.store.dspon = true; }
     #endif
 }
 
-void BacklightPlugin::wake() {
-    Serial.println("##BACKLIGHT -> wake");
-    if (!brightnessCaptured) return;       // ha nincs mentett állapot, kilép
-    setBacklight(config.store.brightness); // visszaállítja a WEB UI -on mentett fényerőt
-    lastUiWakeMs = millis();
+void BacklightPlugin::setEnabled(bool enabled) {
+    if (!enabled) {
+        if (brightnessCaptured) setBacklight(config.store.brightness);
+        brightnessCaptured = false;
+        state = WAIT;
+        log_i("##[FADE]# disabled, brightness=%u%%", (unsigned)config.store.brightness);
+        return;
+    }
+
+    if (brightnessCaptured && currentBrightness != config.store.brightness) {
+        setBacklight(config.store.brightness);
+    }
+    brightnessCaptured = false;
+    state = WAIT;
     lastActivity = millis();
+    log_i("##[FADE]# armed delay=%us target=%u%% step=%u%% brightness=%u%%",
+          (unsigned)config.store.fadeStartDelay,
+          (unsigned)config.store.fadeTarget,
+          (unsigned)(config.store.fadeStep ? config.store.fadeStep : 1),
+          (unsigned)config.store.brightness);
+}
+
+void BacklightPlugin::wake() {
+    if (brightnessCaptured && currentBrightness != config.store.brightness) {
+        setBacklight(config.store.brightness);
+        log_i("##[FADE]# wake, brightness=%u%%", (unsigned)config.store.brightness);
+    }
+    lastUiWakeMs = millis();
+    lastActivity = lastUiWakeMs;
     brightnessCaptured = false;
     state = WAIT;
 }
@@ -87,23 +109,34 @@ void BacklightPlugin::tick() {
     uint32_t now = millis();
     switch (state) {
         case WAIT:
-            if (now - lastActivity > config.store.fadeStartDelay * 1000) { // ha eltelt a várakozási idő
-                targetBrightness = config.store.fadeTarget;                // a sötétedési cél átadása
+            if (now - lastActivity > (uint32_t)config.store.fadeStartDelay * 1000UL) { // ha eltelt a várakozási idő
+                targetBrightness = config.store.fadeTarget > 100 ? 100 : config.store.fadeTarget;
+                if (currentBrightness <= targetBrightness) {
+                    state = DIMMED;
+                    log_i("##[FADE]# no dimming needed: brightness=%u%% target=%u%%",
+                          (unsigned)currentBrightness, (unsigned)targetBrightness);
+                    break;
+                }
                 state = FADING;                                            // átkapcsol FADING állapotba
                 lastFadeStep = now;                                        // a mostani idő lesz a fade lépcső kezdete
+                log_i("##[FADE]# start %u%% -> %u%%",
+                      (unsigned)currentBrightness, (unsigned)targetBrightness);
             }
             break;
         case FADING:
             if (now - lastFadeStep < FADE_PERIOD) break; // ha a két lépcső közötti idő még nem telt el, akkor kilép
             lastFadeStep = now;                          // a mostani idő lesz a fade lépcső kezdete
             if (currentBrightness > targetBrightness) {  // ha még kell tovább sötétíteni
-                if (currentBrightness <= config.store.fadeStep)
-                    currentBrightness = targetBrightness;
-                else
-                    currentBrightness -= config.store.fadeStep;
+                const uint8_t step = config.store.fadeStep ? config.store.fadeStep : 1;
+                const uint8_t remaining = currentBrightness - targetBrightness;
+                currentBrightness -= step < remaining ? step : remaining;
                 setBacklight(currentBrightness); // beállítja a képernyőt
+                if (currentBrightness == targetBrightness) {
+                    state = DIMMED;
+                    log_i("##[FADE]# dimmed to %u%%", (unsigned)currentBrightness);
+                }
             } else {
-                state = DIMMED; // ha már nem kell tovább sötétíteni akkor az állapot DIMMED
+                state = DIMMED;
             }
             break;
         case DIMMED: break; // ha már DIMMED csak továbblép

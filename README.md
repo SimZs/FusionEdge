@@ -10,9 +10,24 @@ The project grew from the LovyanGFX/LittleFS-based [VTomRadio](https://github.co
 
 ## Project status
 
-FusionEdge is now feature-complete. Version 1.0.5 is the final planned feature
-release; future updates will focus on confirmed bug fixes and compatibility
+FusionEdge is now feature-complete. Version 1.0.5 was the final planned feature
+release; subsequent updates focus on confirmed bug fixes and compatibility
 maintenance.
+
+### Version 1.0.6
+
+- Stabilized DLNA browser initialization, category loading, playlist import and
+  switching between DLNA and WEB playlists
+- Improved HTTPS stream reliability by coordinating CoverArt, DLNA and audio
+  network operations and reducing internal-memory pressure
+- Improved stream-stall and Wi-Fi reconnection recovery while preserving the
+  user's playback intent
+- Fixed WebUI file-serving races that could crash `player.html` or leave the
+  display locked after an interrupted request
+- Fixed automatic backlight fading, including invalid legacy settings and a
+  zero fade-step value
+- Prevented the built-in LED and NeoPixel strip from competing for GPIO48
+- Added an optional ESP32-WROVER-E N16R8 PlatformIO configuration template
 
 ### Version 1.0.5
 
@@ -47,6 +62,10 @@ The supplied `platformio.ini` targets an ESP32-S3 DevKitC-1 N16R8 board using th
    Wi-Fi credentials, or configure Wi-Fi through the radio's access point.
 4. Build and upload the firmware.
 5. Upload the `data` directory as a LittleFS filesystem image.
+
+An additional classic ESP32-WROVER-E N16R8 template is available as
+`platformio_esp32-wrover-n16r8.ini`. It requires matching classic-ESP32 pin
+definitions in `myoptions.h`.
 
 `data/data/wifi.csv` is intentionally ignored by Git because it contains local
 network credentials.
@@ -83,7 +102,7 @@ append entries to the playback list.
 Directory browsing runs through a background worker instead of the web-server
 callback. This keeps SOAP requests away from the AsyncTCP task and makes larger
 or slower media-server libraries considerably more reliable. The WebUI and
-firmware endpoints are version-dependent, so upload the v1.0.5 LittleFS data
+firmware endpoints are version-dependent, so upload the v1.0.6 LittleFS data
 along with the firmware when upgrading from an earlier release.
 
 ## Last.fm album art
