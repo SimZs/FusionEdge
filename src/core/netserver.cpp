@@ -1,6 +1,9 @@
 // clang-format off
 #include "options.h"
 #include "Arduino.h"
+#if CONFIG_IDF_TARGET_ESP32
+  #include "esp_heap_caps.h"
+#endif
 #include <LittleFS.h>
 #include <Update.h>
 #include "config.h"
@@ -789,6 +792,9 @@ bool NetServer::begin(bool quiet) {
         request->send(500, "application/json", "{\"ok\":false,\"msg\":\"rename failed\"}");
         return;
       }
+      // Never leave an old index paired with the newly uploaded CSV if power
+      // is lost before the main loop performs the scheduled rebuild.
+      if (LittleFS.exists(INDEX_DLNA_PATH)) { LittleFS.remove(INDEX_DLNA_PATH); }
       // The browser can preview the uploaded CSV directly, but playback uses
       // indexdlna.dat. Rebuild that index from the main loop, outside AsyncTCP.
       g_dlnaPlaylistDirty = true;
@@ -863,6 +869,14 @@ bool NetServer::begin(bool quiet) {
   auto sendWebFile = [](AsyncWebServerRequest *request, const char *plainPath,
                         const char *gzipPath, const char *contentType,
                         bool plainAvailable, bool gzipAvailable) {
+#if CONFIG_IDF_TARGET_ESP32
+    const size_t internalFree = heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    if (internalFree < 24576) {
+      log_w("##[WEBMEM]# low internal heap path='%s' free=%u largest=%u",
+            plainAvailable ? plainPath : gzipPath, (unsigned)internalFree,
+            (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
+    }
+#endif
     if (plainAvailable) {
       request->send(LittleFS, plainPath, contentType);
       return;
@@ -1626,7 +1640,16 @@ void NetServer::processQueue() {
         break;
       }
 #if defined(USE_SD) || defined(USE_BLUETOOTH)
-      case CHANGEMODE: config.changeMode(config.newConfigMode);
+      case CHANGEMODE:
+#ifdef USE_DLNA
+        // A WebUI "WEB" választása a normál WEB playlistet jelenti. A DLNA
+        // ugyan PM_WEB motort használ, ezért a logikai forrást is rendezni kell.
+        if (config.newConfigMode == PM_WEB) {
+          config.store.playlistSource = PL_SRC_WEB;
+          config.saveValue(&config.store.playlistSource, (uint8_t)PL_SRC_WEB);
+        }
+#endif
+        config.changeMode(config.newConfigMode);
 
   #ifdef USE_DLNA  //DLNA modplus
         if (config.resumeAfterModeChange) {

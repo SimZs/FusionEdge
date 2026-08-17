@@ -202,6 +202,7 @@ static void dlna_worker_task(void* ) {
       xSemaphoreTake(g_littlefsMux, portMAX_DELAY);
       LittleFS.remove(PLAYLIST_DLNA_PATH);
       ok = LittleFS.rename(TMP_PATH, PLAYLIST_DLNA_PATH);
+      if (ok) { LittleFS.remove(INDEX_DLNA_PATH); }
       xSemaphoreGive(g_littlefsMux);
 
       if (!ok) {

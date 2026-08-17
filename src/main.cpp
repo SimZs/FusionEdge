@@ -18,6 +18,9 @@
 #endif
 // #include "core/mqtt.h"
 #include "driver/rtc_io.h"
+#if CONFIG_IDF_TARGET_ESP32 && defined(BOARD_HAS_PSRAM)
+#    include "esp_heap_caps.h"
+#endif
 #include "core/serial_littlefs.h"
 
 #include "core/optionschecker.h"
@@ -97,6 +100,22 @@ extern decode_results irResults;
 static TaskHandle_t clockTtsTaskHandle = nullptr;
 static bool         serialLittlefsEnabled = true;
 
+static void configureClassicEsp32PsramAllocator() {
+#if CONFIG_IDF_TARGET_ESP32 && defined(BOARD_HAS_PSRAM)
+    if (!psramFound()) return;
+
+    // The Arduino core normally keeps allocations up to 4 KB in internal RAM.
+    // A classic ESP32-WROVER has much less internal heap than the S3, and the
+    // WebUI's concurrent LittleFS responses still need internal-only newlib,
+    // VFS and FreeRTOS locks. Move medium-sized general allocations to PSRAM
+    // early, before plugins, display widgets and networking are initialized.
+    heap_caps_malloc_extmem_enable(1024);
+    log_i("##[MEM]# classic ESP32 PSRAM threshold=1024 internalFree=%u largest=%u",
+          (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
+          (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
+#endif
+}
+
 static bool loadSerialLittlefsEnabledFromEeprom() {
     config.eepromRead(EEPROM_START, config.store);
     if (config.store.config_set != 0) return true;
@@ -171,6 +190,7 @@ static bool serviceMaintenanceMode() {
 void setup() {
     Serial.begin(460800); 
     delay(100);
+    configureClassicEsp32PsramAllocator();
     EEPROM.begin(EEPROM_SIZE);
     serial_littlefs_begin(Serial);
     serialLittlefsEnabled = loadSerialLittlefsEnabledFromEeprom();

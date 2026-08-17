@@ -594,6 +594,9 @@ void Player::_play(uint16_t stationId) {
   // ----- SD MODE -----
   if (config.getMode() == PM_SDCARD && SDC_CS != 255) {
     display.waitDMA(); // DMA befejezése SD fájl megnyitás előtt
+    // connecttoFS() already emits the initial "Reading file" event. Let the
+    // handler reset the previous track's ID3 state before audio decoding starts.
+    acceptStreamMeta = true;
     // A connecttoFS NEM támogat start offsetet SD-n → -1, indítás pozícionálás nélkül.
     isConnected = connecttoFS(sdman, config.station.url, -1);
   } else {
@@ -732,8 +735,6 @@ uint8_t Player::volToI2S(uint8_t volume) {
 
 void Player::_loadVol() {
   const uint8_t baseVolume = volToI2S(config.store.volume);
-  const float effectiveVolume = fminf(
-      (float)I2S_VOLUME_STEPS, (float)baseVolume * g_stationVolumeScale);
   setVolume(baseVolume, 0);
 }
 

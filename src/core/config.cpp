@@ -561,16 +561,23 @@ void Config::changeMode(int newmode) { // DLNA mod
 
 void Config::initSDPlaylist() {
 #ifdef USE_SD
-    // bool doIndex = !sdman.exists(INDEX_SD_PATH); // "módosítás"
-    // if(doIndex) sdman.indexSDPlaylist();
-    //  Mindig legyen indexelés az SD kártyán.
+    // Rebuild the index, but preserve the last selected SD track whenever it
+    // is still valid for the current card contents.
     sdman.indexSDPlaylist();
     if (SDPLFS()->exists(INDEX_SD_PATH)) {
         File index = SDPLFS()->open(INDEX_SD_PATH, "r");
-        // if(doIndex){
-        lastStation(_randomStation());
+        const uint16_t stationCount = index ? index.size() / 4 : 0;
+        if (stationCount == 0) {
+            if (store.lastSdStation != 0) {
+                saveValue(&store.lastSdStation, static_cast<uint16_t>(0));
+            }
+        } else if (store.lastSdStation == 0 || store.lastSdStation > stationCount) {
+            saveValue(&store.lastSdStation, static_cast<uint16_t>(1));
+        }
+        log_i("##[SD]# playlist tracks=%u resume=%u",
+              static_cast<unsigned>(stationCount),
+              static_cast<unsigned>(store.lastSdStation));
         sdResumePos = 0;
-        // }
         index.close();
     }
 #endif // #ifdef USE_SD
@@ -620,6 +627,17 @@ bool Config::prepareForPlaying(uint16_t stationId) {
 void Config::configPostPlaying(uint16_t stationId) { // DLNA mod
     if (getMode() == PM_SDCARD) {
         saveValue(&store.lastSdStation, stationId);
+
+        // ID3 nélküli fájlnál is legyen értelmes cím és CoverArt keresési
+        // alap. A később érkező Artist/Title ID3 mezők ezt felülírják.
+        if (strcmp(station.title, LANG::const_PlConnect) == 0 && station.name[0] != '\0') {
+            char localTitle[BUFLEN];
+            strlcpy(localTitle, station.name, sizeof(localTitle));
+            char* extension = strrchr(localTitle, '.');
+            if (extension && extension != localTitle) { *extension = '\0'; }
+            log_i("##[SDMETA]# filename fallback='%s'", localTitle);
+            setTitle(localTitle);
+        }
     }
 #ifdef USE_DLNA
     else if (store.playlistSource == PL_SRC_DLNA) {
@@ -1659,7 +1677,8 @@ void Config::setTitle(const char* title) {
     coverArt.requestCombined(strcmp(config.station.title, config.station.name) == 0
                                  ? ""
                                  : config.station.title,
-                             getMode() == PM_BLUETOOTH);
+                             getMode() == PM_BLUETOOTH,
+                             getMode() == PM_SDCARD);
 #endif
     netserver.requestOnChange(TITLE, 0);
     // netserver.loop() szándékosan NINCS itt hívva — az azonnali WebSocket
@@ -1736,9 +1755,10 @@ void Config::indexDLNAPlaylist() {
 
         lines++;
 
-        // WDT/Task starvation ellen (DLNA/WiFi közben kellhet)
-        if ((lines % 50) == 0) {
-            delay(0); // vagy yield();
+        // A hívó lehet a DspTask is. Egy valódi ticknyi szünet kell, hogy az
+        // IDLE0 fusson és az ESP32-S3 task watchdogot etesse.
+        if ((lines % 32) == 0) {
+            vTaskDelay(1);
         }
     }
 
@@ -1763,7 +1783,9 @@ void Config::initPlaylist() {
 
 #ifdef USE_DLNA // DLNA mod
 void Config::initDLNAPlaylist() {
-    indexDLNAPlaylist();
+    // Feltöltés/build után a main loop már újraépíti az indexet. Módváltáskor
+    // csak akkor dolgozzunk végig a teljes CSV-n, ha az index tényleg hiányzik.
+    if (!LittleFS.exists(INDEX_DLNA_PATH)) { indexDLNAPlaylist(); }
 
     if (LittleFS.exists(INDEX_DLNA_PATH)) {
         File index = LittleFS.open(INDEX_DLNA_PATH, "r");
@@ -2125,7 +2147,15 @@ void Config::doSleep() {
         mask |= (1ULL << WAKE_PIN2);
     }
 #endif
-    if (mask != 0) { esp_sleep_enable_ext1_wakeup(mask, ESP_EXT1_WAKEUP_ANY_LOW); }
+    if (mask != 0) {
+#if CONFIG_IDF_TARGET_ESP32
+        // Classic ESP32 supports ALL_LOW and ANY_HIGH only. With the existing
+        // pull-ups, active-low wake inputs therefore use ALL_LOW.
+        esp_sleep_enable_ext1_wakeup(mask, ESP_EXT1_WAKEUP_ALL_LOW);
+#else
+        esp_sleep_enable_ext1_wakeup(mask, ESP_EXT1_WAKEUP_ANY_LOW);
+#endif
+    }
     esp_sleep_enable_timer_wakeup(config.sleepfor * 60ULL * 1000000ULL);
     esp_deep_sleep_start();
 }
@@ -2157,7 +2187,13 @@ void Config::doSleepW() {
     }
 #endif
     delay(200);
-    if (mask != 0) { esp_sleep_enable_ext1_wakeup(mask, ESP_EXT1_WAKEUP_ANY_LOW); }
+    if (mask != 0) {
+#if CONFIG_IDF_TARGET_ESP32
+        esp_sleep_enable_ext1_wakeup(mask, ESP_EXT1_WAKEUP_ALL_LOW);
+#else
+        esp_sleep_enable_ext1_wakeup(mask, ESP_EXT1_WAKEUP_ANY_LOW);
+#endif
+    }
     esp_deep_sleep_start();
 }
 

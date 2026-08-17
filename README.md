@@ -14,6 +14,16 @@ FusionEdge is now feature-complete. Version 1.0.5 was the final planned feature
 release; subsequent updates focus on confirmed bug fixes and compatibility
 maintenance.
 
+### Version 1.0.7
+
+- Fixed SD playback metadata propagation so embedded artist/title tags can
+  trigger album-cover lookup, with the filename retained as a fallback
+- Preserves the last valid SD track across restarts and safely resets the
+  stored index when the card contents no longer contain that track
+- Added an experimental classic ESP32-WROVER-E N16R8 compatibility package
+  with target-specific PSRAM allocation, wake-mode and GPIO safeguards
+- Kept all WROVER memory changes isolated from the primary ESP32-S3 build
+
 ### Version 1.0.6
 
 - Stabilized DLNA browser initialization, category loading, playlist import and
@@ -67,9 +77,12 @@ The supplied `platformio.ini` targets an ESP32-S3 DevKitC-1 N16R8 board using th
 4. Build and upload the firmware.
 5. Upload the `data` directory as a LittleFS filesystem image.
 
-An additional classic ESP32-WROVER-E N16R8 template is available as
-`platformio_esp32-wrover-n16r8.ini`. It requires matching classic-ESP32 pin
-definitions in `myoptions.h`.
+An experimental classic ESP32-WROVER-E N16R8 package is available in
+[esp32-wrover-n16r8](esp32-wrover-n16r8/README.md). It contains a matching
+`platformio.ini`, example `myoptions.h`, installation steps and the known
+hardware limitations. The ESP32-S3 remains the recommended target: the WROVER
+WebUI can be slow during playback, and HTTPS streams may fail when sufficient
+contiguous internal RAM is unavailable for the TLS handshake.
 
 `data/data/wifi.csv` is intentionally ignored by Git because it contains local
 network credentials.
@@ -106,7 +119,7 @@ append entries to the playback list.
 Directory browsing runs through a background worker instead of the web-server
 callback. This keeps SOAP requests away from the AsyncTCP task and makes larger
 or slower media-server libraries considerably more reliable. The WebUI and
-firmware endpoints are version-dependent, so upload the v1.0.6 LittleFS data
+firmware endpoints are version-dependent, so upload the matching v1.0.7 LittleFS data
 along with the firmware when upgrading from an earlier release.
 
 ## Last.fm album art

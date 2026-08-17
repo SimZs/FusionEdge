@@ -6,6 +6,7 @@
 #include "../../core/player.h"
 #include "../../core/network.h"
 #include "../../core/display.h"
+#include "driver/gpio.h"
 
 
 
@@ -91,6 +92,10 @@ static uint16_t vuMap(uint8_t vu, uint16_t maxLed) {
 // Runtime LED szám a config-ból (max LEDSTRIP_COUNT_MAX)
 // Forward declaration hogy a fájl elejéről is elérhető legyen
 static Adafruit_NeoPixel strip(LEDSTRIP_COUNT_MAX, LEDSTRIP_PIN, NEO_GRB + NEO_KHZ800);
+
+static inline bool ledStripPinAvailable() {
+  return GPIO_IS_VALID_OUTPUT_GPIO((gpio_num_t)LEDSTRIP_PIN);
+}
 
 // Runtime LED szám: config értéke, max LEDSTRIP_COUNT_MAX (nincs min() típuskonfliktus)
 static inline uint16_t ledCount() {
@@ -927,6 +932,10 @@ void ledstripPluginInit() {
 }
 
 void LedStripPlugin::on_setup() {
+  if (!ledStripPinAvailable()) {
+    log_i("##[LEDSTRIP]# disabled, no valid output GPIO configured");
+    return;
+  }
   vuSmoothInit();   // exponenciális VU envelope follower koefficiensek init
   strip.begin();
   strip.setBrightness(map(config.store.lsBrightness, 0, 100, 0, 255));
@@ -939,30 +948,36 @@ void LedStripPlugin::on_setup() {
 }
 
 void LedStripPlugin::on_connect() {
+  if (!ledStripPinAvailable()) return;
   g_connectedSeen = true;
   flashNow(0, 80, 255, 220);
 }
 
 void LedStripPlugin::on_start_play() {
+  if (!ledStripPinAvailable()) return;
   g_mode = LM_PLAY;
   flashNow(0, 180, 40, 140);
 }
 
 void LedStripPlugin::on_stop_play() {
+  if (!ledStripPinAvailable()) return;
   g_mode = LM_STOP;
   fillAll(180, 0, 0);
   showStrip();
 }
 
 void LedStripPlugin::on_station_change() {
+  if (!ledStripPinAvailable()) return;
   flashNow(0, 220, 180, 180);
 }
 
 void LedStripPlugin::on_track_change() {
+  if (!ledStripPinAvailable()) return;
   flashNow(255, 255, 255, 120);
 }
 
 void LedStripPlugin::on_ticker() {
+  if (!ledStripPinAvailable()) return;
   uint8_t vol = config.store.volume;
   if (vol != g_lastVolume) {
     g_lastVolume = vol;
@@ -971,6 +986,8 @@ void LedStripPlugin::on_ticker() {
 }
 
 void LedStripPlugin::on_loop() {
+  if (!ledStripPinAvailable()) return;
+
   // Ha a plugin le van tiltva WebUI-ból → szalag sötét
   if (!config.store.lsEnabled) {
     strip.clear();

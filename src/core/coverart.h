@@ -9,7 +9,8 @@
 class CoverArtManager {
   public:
     void begin();
-    void requestCombined(const char* combinedTitle, bool bluetoothTitleMode = false);
+    void requestCombined(const char* combinedTitle, bool bluetoothTitleMode = false,
+                         bool localFileMode = false);
     bool pauseNetwork(uint32_t timeoutMs = 6000);
     void resumeNetwork();
     bool networkPaused();
@@ -28,6 +29,7 @@ class CoverArtManager {
         char     title[TITLE_LEN];
         char     key[KEY_LEN];
         bool     bluetoothTitleMode;
+        bool     localFileMode;
     };
 
     QueueHandle_t _queue = nullptr;

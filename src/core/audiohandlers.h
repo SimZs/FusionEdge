@@ -126,6 +126,11 @@ void my_audio_info(Audio::msg_t m) {
     // ----- Általános információk, formátum, SD hossz stb. -----
     case Audio::evt_info:
     {
+      if (config.getMode() == PM_SDCARD && strstr(msg, "Reading file:") != nullptr) {
+        currentArtist = "";
+        currentTitle = "";
+      }
+
       // Formátum felismerés
       BitrateFormat newFmt = BF_UNKNOWN;
       const bool isMp3Info =
@@ -357,6 +362,9 @@ void processID3(const char *msg) {
     String info;
     if (currentArtist.length() > 0 && currentTitle.length() > 0) {
       info = currentArtist + " - " + currentTitle;
+      if (config.getMode() == PM_SDCARD) {
+        log_i("##[SDMETA]# artist='%s' title='%s'", currentArtist.c_str(), currentTitle.c_str());
+      }
     } else if (currentArtist.length() > 0) {
       info = currentArtist + " -  ";  // cím még nincs
     }

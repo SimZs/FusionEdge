@@ -2,7 +2,7 @@
 #define options_h
 #pragma once
 
-#define FW_VERSION "1.0.6"
+#define FW_VERSION "1.0.7"
 
 #ifndef THEME_CSV_VERSION
 #    define THEME_CSV_VERSION "0.0.1"
@@ -502,7 +502,13 @@ STORE YOUR SETTINGS IN THE *** myoptions.h *** FILE.
   #define COLOR_IP_BORDER         102, 178, 255
 #endif
 #ifndef LEDSTRIP_PIN
-  #define LEDSTRIP_PIN  48
+  #if CONFIG_IDF_TARGET_ESP32S3
+    #define LEDSTRIP_PIN  48
+  #else
+    // GPIO48 is an ESP32-S3 pin. Other targets keep the plugin inactive
+    // unless a valid output pin is selected explicitly in myoptions.h.
+    #define LEDSTRIP_PIN  255
+  #endif
 #endif
 
 // A NeoPixel driver and the regular Arduino GPIO API cannot own the same pin.

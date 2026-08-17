@@ -959,11 +959,8 @@ bool fetchExactCover(const char* artist, const char* title, uint8_t*& imageData,
     return false;
 }
 
-bool fetchCover(const char* artist, const char* title, bool bluetoothTitleMode,
-                 uint8_t*& imageData, size_t& imageSize, bool& jpeg) {
-    if (fetchExactCover(artist, title, imageData, imageSize, jpeg)) return true;
-    if (coverArt.networkPaused()) return false;
-
+bool fetchTitleFallback(const char* artist, const char* title, bool bluetoothTitleMode,
+                        uint8_t*& imageData, size_t& imageSize, bool& jpeg) {
     char matchedArtist[128];
     char matchedTitle[192];
     const char* requiredArtist = bluetoothTitleMode ? nullptr : artist;
@@ -982,6 +979,32 @@ bool fetchCover(const char* artist, const char* title, bool bluetoothTitleMode,
     if (strcmp(originalKey, matchedKey) == 0) return false;
 
     return fetchExactCover(matchedArtist, matchedTitle, imageData, imageSize, jpeg);
+}
+
+bool fetchCover(const char* artist, const char* title, bool bluetoothTitleMode,
+                bool localFileMode, uint8_t*& imageData, size_t& imageSize, bool& jpeg) {
+    if (fetchExactCover(artist, title, imageData, imageSize, jpeg)) return true;
+    if (coverArt.networkPaused()) return false;
+    if (fetchTitleFallback(artist, title, bluetoothTitleMode,
+                           imageData, imageSize, jpeg)) {
+        return true;
+    }
+    if (coverArt.networkPaused() || !localFileMode) return false;
+
+    // Local ID3 titles often contain a mix/remix qualifier that is absent
+    // from public music databases. Keep the displayed title intact and use
+    // the cleaned form only as a final cover-search fallback.
+    char cleanTitle[192];
+    strlcpy(cleanTitle, title ? title : "", sizeof(cleanTitle));
+    canonicalizeBluetoothTrackTitle(cleanTitle);
+    if (cleanTitle[0] == '\0' || strcmp(cleanTitle, title) == 0) return false;
+
+    log_i("##[SDCOVER]# retry with cleaned title: '%s' - '%s'",
+          artist, cleanTitle);
+    if (fetchExactCover(artist, cleanTitle, imageData, imageSize, jpeg)) return true;
+    if (coverArt.networkPaused()) return false;
+    return fetchTitleFallback(artist, cleanTitle, false,
+                              imageData, imageSize, jpeg);
 }
 
 } // namespace
@@ -1034,12 +1057,17 @@ void CoverArtManager::begin() {
               heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)));
 }
 
-void CoverArtManager::requestCombined(const char* combinedTitle, bool bluetoothTitleMode) {
+void CoverArtManager::requestCombined(const char* combinedTitle, bool bluetoothTitleMode,
+                                      bool localFileMode) {
     if (!_queue || !combinedTitle) return;
 
     Request request{};
     if (!splitCombinedTitle(combinedTitle, request.artist, sizeof(request.artist),
                             request.title, sizeof(request.title))) {
+        if (localFileMode && combinedTitle[0] != '\0') {
+            log_i("##[SDCOVER]# skipped, Artist - Title metadata unavailable: '%s'",
+                  combinedTitle);
+        }
         xSemaphoreTake(_mutex, portMAX_DELAY);
         if (_currentKey[0] != '\0') {
             _currentKey[0] = '\0';
@@ -1055,6 +1083,7 @@ void CoverArtManager::requestCombined(const char* combinedTitle, bool bluetoothT
         return;
     }
     request.bluetoothTitleMode = bluetoothTitleMode;
+    request.localFileMode = localFileMode;
     if (!makeLookupKey(request.artist, request.title, request.bluetoothTitleMode,
                        request.key, sizeof(request.key))) {
         // Values such as "Not Provided" are temporary BT metadata, not a new
@@ -1080,6 +1109,9 @@ void CoverArtManager::requestCombined(const char* combinedTitle, bool bluetoothT
     xSemaphoreGive(_mutex);
 
     xQueueOverwrite(_queue, &request);
+    if (localFileMode) {
+        log_i("##[SDCOVER]# queued: '%s' - '%s'", request.artist, request.title);
+    }
 }
 
 bool CoverArtManager::pauseNetwork(uint32_t timeoutMs) {
@@ -1230,15 +1262,25 @@ void CoverArtManager::_taskLoop() {
         uint8_t* data = nullptr;
         size_t size = 0;
         bool jpeg = false;
+        if (request.localFileMode) {
+            log_i("##[SDCOVER]# lookup: '%s' - '%s'", request.artist, request.title);
+        }
         const bool found = fetchCover(request.artist, request.title,
-                                      request.bluetoothTitleMode, data, size, jpeg);
+                                      request.bluetoothTitleMode,
+                                      request.localFileMode, data, size, jpeg);
         _finishNetworkRequest();
         if (networkPaused()) {
             if (data) free(data);
             continue;
         }
         if (!found) {
-            log_d("##[COVER]# no cover: '%s' - '%s'", request.artist, request.title);
+            if (request.localFileMode) {
+                log_i("##[SDCOVER]# no cover: '%s' - '%s'",
+                      request.artist, request.title);
+            } else {
+                log_d("##[COVER]# no cover: '%s' - '%s'",
+                      request.artist, request.title);
+            }
             continue;
         }
         _publish(request, data, size, jpeg);
