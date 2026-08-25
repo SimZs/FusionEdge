@@ -64,6 +64,7 @@ class Display {
     uint16_t      width();
     uint16_t      height();
     void          setBrightnessPercent(uint8_t percent);
+    bool          idleScreensaverBrightnessActive() const { return _idleScreensaverBrightnessActive; }
     void          applyVuModeChange();
     void          invalidateThemeWidgets();  // Refresh all widgets when theme colors change
     bool          eqToggle();               // EQ overlay toggle, visszaadja az új állapotot
@@ -92,6 +93,7 @@ class Display {
 
   private:
     void _updateStationIcon();
+    bool _idleScreensaverBrightnessActive = false;
     ScrollWidget *  _meta, *_title1, *_plcurrent, *_weather, *_title2;
     PlayListWidget* _plwidget;
     BitrateWidget*  _bitratewidget;
@@ -195,6 +197,8 @@ class Display {
     bool          isLocked() const { return false; }
     uint16_t      width() { return 0; }
     uint16_t      height() { return 0; }
+    void          setBrightnessPercent(uint8_t percent) {}
+    bool          idleScreensaverBrightnessActive() const { return false; }
 
   private:
     void _createDspTask();

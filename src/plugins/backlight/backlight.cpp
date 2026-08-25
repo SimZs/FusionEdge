@@ -74,7 +74,9 @@ void BacklightPlugin::setEnabled(bool enabled) {
 }
 
 void BacklightPlugin::wake() {
-    if (brightnessCaptured && currentBrightness != config.store.brightness) {
+    if (display.idleScreensaverBrightnessActive()) {
+        setBacklight(config.store.screensaverIdleBrightness);
+    } else if (brightnessCaptured && currentBrightness != config.store.brightness) {
         setBacklight(config.store.brightness);
         log_i("##[FADE]# wake, brightness=%u%%", (unsigned)config.store.brightness);
     }

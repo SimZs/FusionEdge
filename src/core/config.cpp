@@ -235,6 +235,9 @@ void Config::init() {
     if (store.fadeStep == 0 || store.fadeStep > 100) {
         saveValue(&store.fadeStep, static_cast<uint8_t>(FADE_STEP));
     }
+    if (store.screensaverIdleBrightness > 100) {
+        saveValue(&store.screensaverIdleBrightness, static_cast<uint8_t>(100));
+    }
     BOOTLOG("CONFIG_VERSION\t%d", store.version);
 
     store.play_mode = store.play_mode & 0b11;
@@ -341,6 +344,7 @@ void Config::_setupVersion() {
             eepromWrite(EEPROM_START, store);
             break;
         }
+        case 8: saveValue(&store.screensaverIdleBrightness, (uint8_t)100); break;
     }
     currentVersion++;
     saveValue(&store.version, currentVersion);
@@ -1311,6 +1315,11 @@ void Config::setScreensaverBlank(bool val) {
     saveValue(&store.screensaverBlank, val);
     display.putRequest(NEWMODE, PLAYER);
 }
+void Config::setScreensaverIdleBrightness(uint8_t val) {
+    val = constrain(val, 0, 100);
+    saveValue(&store.screensaverIdleBrightness, val);
+    if (display.idleScreensaverBrightnessActive()) { display.setBrightnessPercent(val); }
+}
 void Config::setScreensaverPlayingEnabled(bool val) {
     saveValue(&store.screensaverPlayingEnabled, val);
     display.putRequest(NEWMODE, PLAYER);
@@ -1424,6 +1433,7 @@ void Config::resetSystem(const char* val, uint8_t clientId) {
         saveValue(&store.screensaverEnabled, false);
         saveValue(&store.screensaverTimeout, (uint16_t)20);
         saveValue(&store.screensaverBlank, false);
+        saveValue(&store.screensaverIdleBrightness, (uint8_t)100);
         saveValue(&store.screensaverPlayingEnabled, false);
         saveValue(&store.screensaverPlayingTimeout, (uint16_t)300);
         saveValue(&store.screensaverPlayingBlank, false);
@@ -1538,6 +1548,7 @@ void Config::setDefaults() {
     store.screensaverEnabled = false;
     store.screensaverTimeout = 20;
     store.screensaverBlank = false;
+    store.screensaverIdleBrightness = 100;
     snprintf(store.mdnsname, MDNS_LENGTH, "radio-%x", (unsigned int)getChipId());
     store.skipPlaylistUpDown = false;
     store.encodersIndependent = false;

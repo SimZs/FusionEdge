@@ -256,6 +256,10 @@ bool CommandHandler::exec(const char* command, const char* value, uint8_t cid) {
         config.setScreensaverBlank(static_cast<bool>(atoi(value)));
         return true;
     }
+    if (strEquals(command, "screensaveridlebrightness")) {
+        config.setScreensaverIdleBrightness(static_cast<uint8_t>(constrain(atoi(value), 0, 100)));
+        return true;
+    }
     if (strEquals(command, "screensaverplayingenabled")) {
         config.setScreensaverPlayingEnabled(static_cast<bool>(atoi(value)));
         return true;

@@ -1400,6 +1400,9 @@ void NetServer::processQueue() {
           if (BRIGHTNESS_PIN != 255 || nxtn || dbgact) {
             APPEND_GROUP("group_brightness");
           }
+#if BRIGHTNESS_PIN != 255 || DSP_MODEL == DSP_SSD1322
+          APPEND_GROUP("group_idlebrightness");
+#endif
           if (DSP_CAN_FLIPPED || dbgact) {
             APPEND_GROUP("group_tft");
           }
@@ -1507,7 +1510,7 @@ void NetServer::processQueue() {
     "{\"flip\":%d,\"inv\":%d,\"nump\":%d,\"plmc\":%d,\"dcc\":%d,\"slrt\":%d,\"tsf\":%d,\"tsd\":%d,\"dspon\":%d,"
     "\"tsmx\":%d,\"tsmy\":%d,"
     "\"br\":%d,\"con\":%d,"
-    "\"scre\":%d,\"scrt\":%d,\"scrb\":%d,"
+    "\"scre\":%d,\"scrt\":%d,\"scrb\":%d,\"scrib\":%d,"
     "\"scrpe\":%d,\"scrpt\":%d,\"scrpb\":%d,"
     "\"fadeenabled\":%d,\"fadestartdelay\":%d,\"fadetarget\":%d,\"fadestep\":%d"
     "}",
@@ -1527,6 +1530,7 @@ void NetServer::processQueue() {
     config.store.screensaverEnabled,
     config.store.screensaverTimeout,
     config.store.screensaverBlank,
+    config.store.screensaverIdleBrightness,
     config.store.screensaverPlayingEnabled,
     config.store.screensaverPlayingTimeout,
     config.store.screensaverPlayingBlank,

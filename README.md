@@ -14,6 +14,15 @@ FusionEdge is now feature-complete. Version 1.0.5 was the final planned feature
 release; subsequent updates focus on confirmed bug fixes and compatibility
 maintenance.
 
+### Version 1.0.8
+
+- Added a configurable `0-100%` brightness level for the **While not playing**
+  clock screensaver
+- Restores the normal display brightness on wake and keeps the setting
+  compatible with the automatic backlight fade feature
+- Migrates existing configurations automatically with a `100%` default, so a
+  full flash erase is not required
+
 ### Version 1.0.7
 
 - Fixed SD playback metadata propagation so embedded artist/title tags can
@@ -119,7 +128,7 @@ append entries to the playback list.
 Directory browsing runs through a background worker instead of the web-server
 callback. This keeps SOAP requests away from the AsyncTCP task and makes larger
 or slower media-server libraries considerably more reliable. The WebUI and
-firmware endpoints are version-dependent, so upload the matching v1.0.7 LittleFS data
+firmware endpoints are version-dependent, so upload the matching v1.0.8 LittleFS data
 along with the firmware when upgrading from an earlier release.
 
 ## Last.fm album art

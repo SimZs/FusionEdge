@@ -42,7 +42,7 @@
 #    define ESP_ARDUINO_3 1
 #endif
 
-#define CONFIG_VERSION 8
+#define CONFIG_VERSION 9
 #define VOLCURVE_PATH "/data/volcurve.csv"
 
 enum playMode_e : uint8_t { // DLNA mod
@@ -250,6 +250,7 @@ struct config_t {
     /* ----- Auto On-Off Timer -- format: "HH:MM", empty = disabled ----- */
     char    autoStartTime[8];
     char    autoStopTime[8];
+    uint8_t screensaverIdleBrightness; // While Not Playing screensaver, 0..100%
 };
 #if IR_PIN != 255
 struct IRCommand {
@@ -427,6 +428,7 @@ class Config {
     void     enableScreensaver(bool val);
     void     setScreensaverTimeout(uint16_t val);
     void     setScreensaverBlank(bool val);
+    void     setScreensaverIdleBrightness(uint8_t val);
     void     setScreensaverPlayingEnabled(bool val);
     void     setScreensaverPlayingTimeout(uint16_t val);
     void     setScreensaverPlayingBlank(bool val);

@@ -621,6 +621,10 @@ void Display::_swichMode(displayMode_e newmode) {
         return;
     }
     const displayMode_e prevMode = _mode;
+    if (_idleScreensaverBrightnessActive && newmode != SCREENSAVER && newmode != SCREENBLANK && config.store.dspon) {
+        setBrightnessPercent(config.store.brightness);
+    }
+    _idleScreensaverBrightnessActive = false;
     _mode = newmode;
     dsp.setScrollId(NULL);
     if (newmode == PLAYER) {
@@ -687,6 +691,8 @@ void Display::_swichMode(displayMode_e newmode) {
     if (newmode == SCREENSAVER || newmode == SCREENBLANK) {
         eqForceClose();
         config.isScreensaver = true;
+        _idleScreensaverBrightnessActive =
+            newmode == SCREENSAVER && (!player.isRunning() || config.store.volume == 0);
 #    ifdef USE_CASSETTE_SCREENSAVER
         const bool showCassette = newmode == SCREENSAVER && player.isRunning();
         if (_cassettewidget) { _cassettewidget->lock(!showCassette); }
@@ -707,6 +713,8 @@ void Display::_swichMode(displayMode_e newmode) {
             _clock->clear();
 #    endif
             config.setDspOn(false, false);
+        } else if (_idleScreensaverBrightnessActive) {
+            setBrightnessPercent(config.store.screensaverIdleBrightness);
         }
     } else {
         config.screensaverTicks = SCREENSAVERSTARTUPDELAY;
