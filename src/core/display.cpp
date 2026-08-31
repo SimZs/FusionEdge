@@ -21,6 +21,9 @@
 #include "fonts.h"
 #include "speaker_bitmaps.h"
 #include "freertos/semphr.h"
+#if BRIGHTNESS_PIN != 255
+#    include "../plugins/backlight/backlight.h"
+#endif
 #ifdef USE_LASTFM_COVER
 #    include "coverart.h"
 #endif
@@ -621,10 +624,10 @@ void Display::_swichMode(displayMode_e newmode) {
         return;
     }
     const displayMode_e prevMode = _mode;
-    if (_idleScreensaverBrightnessActive && newmode != SCREENSAVER && newmode != SCREENBLANK && config.store.dspon) {
+    if (_clockScreensaverBrightnessActive && newmode != SCREENSAVER && newmode != SCREENBLANK && config.store.dspon) {
         setBrightnessPercent(config.store.brightness);
     }
-    _idleScreensaverBrightnessActive = false;
+    _clockScreensaverBrightnessActive = false;
     _mode = newmode;
     dsp.setScrollId(NULL);
     if (newmode == PLAYER) {
@@ -682,6 +685,7 @@ void Display::_swichMode(displayMode_e newmode) {
         }
         _station();
         _title();
+        _updateStationIcon();
         if (_nums) { _nums->setText(""); }
         if (_spectrum) { _spectrum->lock(displayContentChanging || !config.store.vumeter); }
         config.setDspOn(config.store.dspon, false);
@@ -691,10 +695,9 @@ void Display::_swichMode(displayMode_e newmode) {
     if (newmode == SCREENSAVER || newmode == SCREENBLANK) {
         eqForceClose();
         config.isScreensaver = true;
-        _idleScreensaverBrightnessActive =
-            newmode == SCREENSAVER && (!player.isRunning() || config.store.volume == 0);
 #    ifdef USE_CASSETTE_SCREENSAVER
         const bool showCassette = newmode == SCREENSAVER && player.isRunning();
+        _clockScreensaverBrightnessActive = newmode == SCREENSAVER && !showCassette;
         if (_cassettewidget) { _cassettewidget->lock(!showCassette); }
         if (_clock) {
             if (newmode == SCREENSAVER && !showCassette) {
@@ -705,6 +708,7 @@ void Display::_swichMode(displayMode_e newmode) {
             }
         }
 #    else
+        _clockScreensaverBrightnessActive = newmode == SCREENSAVER;
         if (newmode == SCREENSAVER) { _clock->setZoom(2.0f); }
 #    endif
         _pager->setPage(pages[PG_SCREENSAVER]);
@@ -713,8 +717,8 @@ void Display::_swichMode(displayMode_e newmode) {
             _clock->clear();
 #    endif
             config.setDspOn(false, false);
-        } else if (_idleScreensaverBrightnessActive) {
-            setBrightnessPercent(config.store.screensaverIdleBrightness);
+        } else if (_clockScreensaverBrightnessActive) {
+            setBrightnessPercent(effectiveBrightnessPercent(config.store.brightness));
         }
     } else {
         config.screensaverTicks = SCREENSAVERSTARTUPDELAY;
@@ -1299,8 +1303,16 @@ void Display::_time(bool redraw) {
 
 #    if LIGHT_SENSOR != 255
     if (config.store.dspon) {
-        config.store.brightness = AUTOBACKLIGHT(analogRead(LIGHT_SENSOR));
-        config.setBrightness();
+        const int sensedBrightness = AUTOBACKLIGHT(analogRead(LIGHT_SENSOR));
+        config.store.brightness = static_cast<uint8_t>(constrain(sensedBrightness, 0, 100));
+        bool applySensorBrightness = true;
+#        if BRIGHTNESS_PIN != 255
+        applySensorBrightness = !config.store.fadeEnabled ||
+                                (!backlightPlugin.isFading() && !backlightPlugin.isDimmed());
+#        endif
+        if (applySensorBrightness) {
+            setBrightnessPercent(effectiveBrightnessPercent(config.store.brightness));
+        }
     }
 #    endif
     if (_clock && _clock->locked()) return;   // EQ / VOL overlay aktív — ne rajzoljon felé
@@ -1928,6 +1940,18 @@ void Display::setBrightnessPercent(uint8_t percent) {
 #        if (BRIGHTNESS_PIN != 255)
     analogWrite(BRIGHTNESS_PIN, map(percent, 0, 100, 0, 255));
 #        endif
+#    endif
+}
+
+uint8_t Display::effectiveBrightnessPercent(uint8_t normalPercent) const {
+    normalPercent = constrain(normalPercent, 0, 100);
+    if (!_clockScreensaverBrightnessActive) return normalPercent;
+
+    const uint8_t clockPercent = constrain(config.store.screensaverIdleBrightness, 0, 100);
+#    if LIGHT_SENSOR != 255
+    return static_cast<uint8_t>((static_cast<uint16_t>(normalPercent) * clockPercent + 50U) / 100U);
+#    else
+    return clockPercent;
 #    endif
 }
 

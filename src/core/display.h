@@ -64,7 +64,8 @@ class Display {
     uint16_t      width();
     uint16_t      height();
     void          setBrightnessPercent(uint8_t percent);
-    bool          idleScreensaverBrightnessActive() const { return _idleScreensaverBrightnessActive; }
+    uint8_t       effectiveBrightnessPercent(uint8_t normalPercent) const;
+    bool          clockScreensaverBrightnessActive() const { return _clockScreensaverBrightnessActive; }
     void          applyVuModeChange();
     void          invalidateThemeWidgets();  // Refresh all widgets when theme colors change
     bool          eqToggle();               // EQ overlay toggle, visszaadja az új állapotot
@@ -93,7 +94,7 @@ class Display {
 
   private:
     void _updateStationIcon();
-    bool _idleScreensaverBrightnessActive = false;
+    bool _clockScreensaverBrightnessActive = false;
     ScrollWidget *  _meta, *_title1, *_plcurrent, *_weather, *_title2;
     PlayListWidget* _plwidget;
     BitrateWidget*  _bitratewidget;
@@ -198,7 +199,8 @@ class Display {
     uint16_t      width() { return 0; }
     uint16_t      height() { return 0; }
     void          setBrightnessPercent(uint8_t percent) {}
-    bool          idleScreensaverBrightnessActive() const { return false; }
+    uint8_t       effectiveBrightnessPercent(uint8_t normalPercent) const { return normalPercent > 100 ? 100 : normalPercent; }
+    bool          clockScreensaverBrightnessActive() const { return false; }
 
   private:
     void _createDspTask();

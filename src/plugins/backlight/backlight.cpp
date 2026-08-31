@@ -74,8 +74,8 @@ void BacklightPlugin::setEnabled(bool enabled) {
 }
 
 void BacklightPlugin::wake() {
-    if (display.idleScreensaverBrightnessActive()) {
-        setBacklight(config.store.screensaverIdleBrightness);
+    if (display.clockScreensaverBrightnessActive()) {
+        setBacklight(display.effectiveBrightnessPercent(config.store.brightness));
     } else if (brightnessCaptured && currentBrightness != config.store.brightness) {
         setBacklight(config.store.brightness);
         log_i("##[FADE]# wake, brightness=%u%%", (unsigned)config.store.brightness);
@@ -107,6 +107,10 @@ void BacklightPlugin::tick() {
         savedBrightness = config.store.brightness;            // beolvassa az eredeti fényerőt
         currentBrightness = savedBrightness;                  // az aktuális fényerő az eredeti fényerő lesz
         brightnessCaptured = true;                            // rögzítés állapota igaz
+    }
+    if (state == WAIT && brightnessCaptured && currentBrightness != config.store.brightness) {
+        savedBrightness = config.store.brightness;
+        currentBrightness = savedBrightness;
     }
     uint32_t now = millis();
     switch (state) {

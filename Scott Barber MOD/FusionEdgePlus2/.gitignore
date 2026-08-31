@@ -1,0 +1,24 @@
+# PlatformIO
+.pio/
+.pioenvs/
+.piolibdeps/
+
+# Editors and tooling
+.vscode/
+.idea/
+.clangd/
+compile_commands.json
+*.code-workspace
+
+# Local and generated files
+*.bak
+*.old
+*.orig
+*.tmp
+*~
+Thumbs.db
+.DS_Store
+
+# Optional local secrets
+mqttoptions.h
+data/data/wifi.csv

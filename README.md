@@ -14,6 +14,21 @@ FusionEdge is now feature-complete. Version 1.0.5 was the final planned feature
 release; subsequent updates focus on confirmed bug fixes and compatibility
 maintenance.
 
+### Version 1.0.9
+
+- Applies the configurable clock-screensaver brightness to both idle playback
+  states and the **While playing** clock when the cassette screensaver is not
+  compiled in
+- Coordinates clock brightness, ambient-light control and automatic fading;
+  with `LIGHT_SENSOR` enabled, the clock setting scales the sensor-controlled
+  brightness instead of replacing it
+- Refreshes the current station or album-cover image immediately after leaving
+  the clock screensaver
+- Improves Last.fm fallback matching by checking more search results while
+  retaining strict artist priority and guarded title-only matching
+- Includes Scott Barber's independent community MOD as an unchanged snapshot,
+  with smaller-display layouts and additional screensaver choices
+
 ### Version 1.0.8
 
 - Added a configurable `0-100%` brightness level for the **While not playing**
@@ -107,6 +122,19 @@ pio device monitor
 
 The serial monitor speed is `460800` baud.
 
+## Scott Barber community MOD
+
+Scott Barber's complete, unchanged community build is preserved in
+[Scott Barber MOD/FusionEdgePlus2](Scott%20Barber%20MOD/FusionEdgePlus2). It
+adds layouts for smaller displays, including ILI9341 support, automatic tape
+color changes, and selectable screensaver styles including album-cover art.
+
+This directory is published as a separate, self-contained snapshot in thanks
+for Scott's extensive work. It is not part of the main FusionEdge maintenance
+line and will not automatically receive changes, fixes or new features from
+future main firmware revisions. Use the configuration and documentation stored
+inside that directory with the MOD itself.
+
 ## Bluetooth
 
 The tested Bluetooth path uses a QCC5124EL module:
@@ -128,7 +156,7 @@ append entries to the playback list.
 Directory browsing runs through a background worker instead of the web-server
 callback. This keeps SOAP requests away from the AsyncTCP task and makes larger
 or slower media-server libraries considerably more reliable. The WebUI and
-firmware endpoints are version-dependent, so upload the matching v1.0.8 LittleFS data
+firmware endpoints are version-dependent, so upload the matching v1.0.9 LittleFS data
 along with the firmware when upgrading from an earlier release.
 
 ## Last.fm album art
@@ -187,6 +215,14 @@ label displays the available codec, bitrate, sample-rate and bit-depth
 information. The normal idle screensaver remains the large clock, while
 **Blank screen** continues to switch the display off.
 
+The WebUI **Clock brightness (%)** setting controls the large-clock
+screensaver brightness. It always applies to **While not playing**, and also
+to **While playing** when `USE_CASSETTE_SCREENSAVER` is not defined. The
+cassette screensaver continues to use the normal display brightness.
+When `LIGHT_SENSOR` is configured, this value scales the current automatic
+brightness instead: for example, `50%` displays the clock at half of the
+ambient-light-controlled brightness.
+
 The cassette idea and original animation prototype were contributed by Adam
 Navrowski. The FusionEdge implementation redraws only the two reel areas during
 animation to keep display traffic low. The supplied background is stored at
@@ -227,6 +263,8 @@ To add logos for your own stations, see the
 - 4D Systems gen4-ESP32-35CT board support by Révész Tamás
 - Reintroduction of `IMPERIALUNIT` weather-unit support by Adam Navrowski
 - Cassette screensaver concept and original prototype by Adam Navrowski
+- Improved Last.fm fallback-search concept by Volodimyr
+- Smaller-display and selectable-screensaver community MOD by Scott Barber
 - FusionEdge development by SimZs and contributors
 
 Bundled and external components retain their own copyrights and licenses. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

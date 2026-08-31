@@ -611,8 +611,20 @@ bool artistMatches(const char* expected, const char* candidate) {
            strcmp(normalizedExpected, normalizedCandidate) == 0;
 }
 
+bool titleMatchesSafely(const char* expected, const char* candidate) {
+    if (!expected || !candidate || expected[0] == '\0' || candidate[0] == '\0') {
+        return false;
+    }
+    if (strcmp(expected, candidate) == 0) return true;
+
+    constexpr size_t MIN_PARTIAL_TITLE_LENGTH = 8;
+    return strlen(expected) >= MIN_PARTIAL_TITLE_LENGTH &&
+           strstr(candidate, expected) != nullptr;
+}
+
 bool extractLastFmTrackMatch(const uint8_t* jsonData, size_t jsonSize,
                               const char* requiredArtist,
+                              const char* requiredTitle,
                               char* artist, size_t artistSize,
                               char* title, size_t titleSize) {
     artist[0] = '\0';
@@ -627,6 +639,11 @@ bool extractLastFmTrackMatch(const uint8_t* jsonData, size_t jsonSize,
     cJSON* tracks = cJSON_IsObject(matches)
                         ? cJSON_GetObjectItemCaseSensitive(matches, "track")
                         : nullptr;
+    char normalizedRequiredTitle[192];
+    normalizeKeyPart(requiredTitle, normalizedRequiredTitle, sizeof(normalizedRequiredTitle));
+    char fallbackArtist[128] = {0};
+    char fallbackTitle[192] = {0};
+
     const int trackCount = cJSON_IsArray(tracks) ? cJSON_GetArraySize(tracks) : 1;
     for (int index = 0; index < trackCount; ++index) {
         cJSON* track = cJSON_IsArray(tracks) ? cJSON_GetArrayItem(tracks, index) : tracks;
@@ -640,12 +657,29 @@ bool extractLastFmTrackMatch(const uint8_t* jsonData, size_t jsonSize,
             !cJSON_IsString(matchTitle) || !matchTitle->valuestring) {
             continue;
         }
-        if (requiredArtist && !artistMatches(requiredArtist, matchArtist->valuestring)) {
-            continue;
+
+        if (requiredArtist && artistMatches(requiredArtist, matchArtist->valuestring)) {
+            strlcpy(artist, matchArtist->valuestring, artistSize);
+            strlcpy(title, matchTitle->valuestring, titleSize);
+            break;
         }
-        strlcpy(artist, matchArtist->valuestring, artistSize);
-        strlcpy(title, matchTitle->valuestring, titleSize);
-        break;
+
+        if (fallbackArtist[0] == '\0') {
+            char normalizedMatchTitle[192];
+            normalizeKeyPart(matchTitle->valuestring, normalizedMatchTitle,
+                             sizeof(normalizedMatchTitle));
+            if (titleMatchesSafely(normalizedRequiredTitle, normalizedMatchTitle)) {
+                strlcpy(fallbackArtist, matchArtist->valuestring, sizeof(fallbackArtist));
+                strlcpy(fallbackTitle, matchTitle->valuestring, sizeof(fallbackTitle));
+            }
+        }
+    }
+    if (artist[0] == '\0' && fallbackArtist[0] != '\0') {
+        strlcpy(artist, fallbackArtist, artistSize);
+        strlcpy(title, fallbackTitle, titleSize);
+        log_d("##[COVER]# title match fallback: '%s' / '%s' -> '%s' / '%s'",
+              requiredArtist ? requiredArtist : "", requiredTitle ? requiredTitle : "",
+              artist, title);
     }
     cJSON_Delete(root);
     return artist[0] != '\0' && title[0] != '\0';
@@ -664,7 +698,7 @@ bool findLastFmTrackByTitle(const char* rawTitle, const char* requiredArtist,
     }
     if (searchTitle[0] == '\0') return false;
 
-    String url = "http://ws.audioscrobbler.com/2.0/?method=track.search&format=json&limit=3&api_key=";
+    String url = "http://ws.audioscrobbler.com/2.0/?method=track.search&format=json&limit=10&api_key=";
     url += LASTFM_API_KEY;
     url += "&track=";
     url += urlEncode(searchTitle);
@@ -672,7 +706,7 @@ bool findLastFmTrackByTitle(const char* rawTitle, const char* requiredArtist,
     uint8_t* jsonData = nullptr;
     size_t jsonSize = 0;
     if (!httpGetToPsram(url, API_RESPONSE_LIMIT, jsonData, jsonSize)) return false;
-    const bool found = extractLastFmTrackMatch(jsonData, jsonSize, requiredArtist,
+    const bool found = extractLastFmTrackMatch(jsonData, jsonSize, requiredArtist, searchTitle,
                                                 artist, artistSize, title, titleSize);
     free(jsonData);
     if (found && bluetoothTitleMode) canonicalizeBluetoothTrackTitle(title);

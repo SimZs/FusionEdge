@@ -1,0 +1,67 @@
+#include "../../core/options.h"
+#include "../../core/config.h"
+#include "../display_select.h"
+#include "Arduino.h"
+#include "sliderWidget.h"
+
+/**************************************************************************************************************
+                                              SLIDER WIDGET (hangerő csík)
+ **************************************************************************************************************/
+void SliderWidget::init(FillConfig conf, uint16_t fgcolor, uint16_t bgcolor, uint32_t maxval, uint16_t oucolor) {
+    Widget::init(conf.widget, fgcolor, bgcolor);
+    _width = conf.width;
+    _height = conf.height;
+    _outlined = conf.outlined;
+    _oucolor = oucolor, _max = maxval;
+    _oldvalwidth = _value = 0;
+}
+
+void SliderWidget::setValue(uint32_t val) {
+    _value = val;
+    if (_active && !_locked) { _drawslider(); }
+}
+
+void SliderWidget::_drawslider() {
+    uint16_t innerWidth = (_width > _outlined * 2) ? (_width - _outlined * 2) : 0;
+    uint16_t valwidth = 0;
+    if (_max > 0 && innerWidth > 0) {
+        uint32_t clampedValue = min(_value, _max);
+        valwidth = map(clampedValue, 0, _max, 0, innerWidth);
+    }
+    if (_oldvalwidth == valwidth) { return; }
+    int32_t  x = _config.left + _outlined + min(valwidth, _oldvalwidth);
+    int32_t  y = _config.top + _outlined;
+    int32_t  w = abs(_oldvalwidth - valwidth);
+    int32_t  h = _height - _outlined * 2;
+    uint16_t color = _oldvalwidth > valwidth ? _bgcolor : _fgcolor;
+    dsp.fillRect(x, y, w, h, color);
+    _oldvalwidth = valwidth;
+}
+
+void SliderWidget::_draw() {
+    if (_locked) { return; }
+    _clear();
+    if (!_active) { return; }
+    if (_outlined) { dsp.drawRect(_config.left, _config.top, _width, _height, _oucolor); }
+    uint16_t innerWidth = (_width > _outlined * 2) ? (_width - _outlined * 2) : 0;
+    uint16_t valwidth = 0;
+    if (_max > 0 && innerWidth > 0) {
+        uint32_t clampedValue = min(_value, _max);
+        valwidth = map(clampedValue, 0, _max, 0, innerWidth);
+    }
+    dsp.fillRect(_config.left + _outlined, _config.top + _outlined, valwidth, _height - _outlined * 2, _fgcolor);
+}
+
+void SliderWidget::_clear() {
+    dsp.fillRect(_config.left, _config.top, _width, _height, _bgcolor);
+}
+void SliderWidget::_reset() {
+    _oldvalwidth = 0;
+}
+
+void SliderWidget::setColors(uint16_t fg, uint16_t bg) {
+    _fgcolor = fg;
+    _bgcolor = bg;
+    _oldvalwidth = 0;  // force full redraw
+    _draw();
+}

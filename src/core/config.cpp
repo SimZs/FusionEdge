@@ -1318,7 +1318,9 @@ void Config::setScreensaverBlank(bool val) {
 void Config::setScreensaverIdleBrightness(uint8_t val) {
     val = constrain(val, 0, 100);
     saveValue(&store.screensaverIdleBrightness, val);
-    if (display.idleScreensaverBrightnessActive()) { display.setBrightnessPercent(val); }
+    if (display.clockScreensaverBrightnessActive()) {
+        display.setBrightnessPercent(display.effectiveBrightnessPercent(store.brightness));
+    }
 }
 void Config::setScreensaverPlayingEnabled(bool val) {
     saveValue(&store.screensaverPlayingEnabled, val);
