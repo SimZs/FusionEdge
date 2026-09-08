@@ -49,8 +49,8 @@ the careful development, testing and continued refinement.
   the clock screensaver
 - Improves Last.fm fallback matching by checking more search results while
   retaining strict artist priority and guarded title-only matching
-- Includes Scott Barber's independent community MOD as an unchanged snapshot,
-  with smaller-display layouts and additional screensaver choices
+- Scott Barber's independent community MOD has moved to its own repository,
+  where it can be maintained separately from the main firmware
 
 ### Version 1.0.8
 
@@ -147,20 +147,20 @@ The serial monitor speed is `460800` baud.
 
 ## Scott Barber community MOD
 
-Scott Barber's complete, unchanged community build is preserved in
-[Scott Barber MOD/FusionEdgePlus2](Scott%20Barber%20MOD/FusionEdgePlus2). It
-adds layouts for smaller displays, including ILI9341 support, automatic tape
-color changes, and selectable screensaver styles including album-cover art.
-
-This directory is published as a separate, self-contained snapshot in thanks
-for Scott's extensive work. It is not part of the main FusionEdge maintenance
-line and will not automatically receive changes, fixes or new features from
-future main firmware revisions. Use the configuration and documentation stored
-inside that directory with the MOD itself.
+Scott Barber's independent community build is maintained separately in the
+[FusionEdgePlus2 repository](https://github.com/SimZs/FusionEdgePlus2). It adds
+layouts for smaller displays, including ILI9341 support, automatic tape color
+changes, and selectable screensaver styles including album-cover art. The MOD
+has its own source tree, configuration and documentation and does not
+automatically receive changes from the main FusionEdge firmware.
 
 ## Bluetooth
 
 The tested Bluetooth path uses a QCC5124EL module:
+
+- [QCC5124EL module purchase link](https://www.aliexpress.com/item/1005007412462266.html)
+- Select **Bundle: HFP** and **Color: 5124 I2S** when ordering; other variants
+  are not the tested FusionEdge configuration
 
 - UART AT control on the pins configured by `BT_UART_TX` and `BT_UART_RX`
 - I2S input on `BT_I2S_BCK`, `BT_I2S_LRCK` and `BT_I2S_DATA`
