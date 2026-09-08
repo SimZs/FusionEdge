@@ -28,6 +28,9 @@ class DateWidget;
 class StatusWidget;
 class EqWidget;
 class CassetteWidget;
+#ifdef USE_COVER_SCREENSAVER
+class CoverScreensaverWidget;
+#endif
 
 class Display {
   public:
@@ -94,6 +97,10 @@ class Display {
 
   private:
     void _updateStationIcon();
+#    ifdef USE_COVER_SCREENSAVER
+    void _updateCoverScreensaver();
+    void _updateCoverScreensaverText();
+#    endif
     bool _clockScreensaverBrightnessActive = false;
     ScrollWidget *  _meta, *_title1, *_plcurrent, *_weather, *_title2;
     PlayListWidget* _plwidget;
@@ -119,6 +126,9 @@ class Display {
     EqWidget*       _eqwidget;
 #    ifdef USE_CASSETTE_SCREENSAVER
     CassetteWidget* _cassettewidget = nullptr;
+#    endif
+#    ifdef USE_COVER_SCREENSAVER
+    CoverScreensaverWidget* _coverScreensaverWidget = nullptr;
 #    endif
 
     bool     _locked = false;

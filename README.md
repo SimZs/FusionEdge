@@ -10,9 +10,32 @@ The project grew from the LovyanGFX/LittleFS-based [VTomRadio](https://github.co
 
 ## Project status
 
-FusionEdge is now feature-complete. Version 1.0.5 was the final planned feature
-release; subsequent updates focus on confirmed bug fixes and compatibility
-maintenance.
+FusionEdge is now feature-complete. Development focuses on confirmed bug fixes,
+hardware compatibility and selected community contributions.
+
+### Version 1.0.10
+
+- Adds an optional full-screen album-cover screensaver with current track,
+  time, date, nameday and weather information
+- Improves multilingual Last.fm matching by normalizing punctuation, Unicode
+  dashes and quotes, Cyrillic case and trailing technical IDs, and by matching
+  any semicolon-separated artist together with the track title
+- Raises the accepted cover-image size to 512 KB while retaining PSRAM-backed
+  storage and cooperative network handling
+- Adds configurable backlight PWM frequency and Wi-Fi TX power defaults to
+  reduce audio interference and supply-current peaks on sensitive hardware
+- Adds optional `BTN_MODE` and `BTN_RGB` controls for source switching, LED
+  strip enable/disable and effect selection
+- Keeps RGB VU animation active during playback screensavers, including a
+  dedicated Bluetooth VU source, and reserves the idle animation for silence
+- Makes WEB/SD/DLNA and Bluetooth transitions safer by coordinating decoder,
+  I2S bridge and remote-source pause state
+- Corrects FLAC sample-buffer reuse, restores the gen4-ESP32-35CT landscape
+  orientation and synchronizes the supported hardware configuration examples
+
+The full-screen cover screensaver and most non-Bluetooth improvements in this
+release were contributed or proposed by Volodimyr Zagranichniy. Thank you for
+the careful development, testing and continued refinement.
 
 ### Version 1.0.9
 
@@ -156,7 +179,7 @@ append entries to the playback list.
 Directory browsing runs through a background worker instead of the web-server
 callback. This keeps SOAP requests away from the AsyncTCP task and makes larger
 or slower media-server libraries considerably more reliable. The WebUI and
-firmware endpoints are version-dependent, so upload the matching v1.0.9 LittleFS data
+firmware endpoints are version-dependent, so upload the matching v1.0.10 LittleFS data
 along with the firmware when upgrading from an earlier release.
 
 ## Last.fm album art
@@ -184,6 +207,11 @@ QCC artist field contains a channel name and the exact lookup fails, FusionEdge
 cleans the video title and resolves it with Last.fm `track.search`. Local files
 still use their exact embedded artist and title metadata first.
 
+Search-result comparison ignores common ASCII and Unicode punctuation and
+normalizes Cyrillic case. A trailing numeric technical ID after a semicolon is
+removed before searching, and metadata containing multiple semicolon-separated
+artists can match when the title and at least one artist agree.
+
 Cover lookup uses plain HTTP and keeps its task stack and JSON allocations in
 PSRAM. This is intentional: opening another TLS session can consume the
 contiguous internal RAM required by HTTPS audio streams on the ESP32-S3. Only
@@ -203,6 +231,18 @@ Fahrenheit, inHg and mph, select `LANGUAGE EN` and define `IMPERIALUNIT` in
 with locale files that currently contain metric-only weather format strings.
 
 The `IMPERIALUNIT` weather-unit option was reintroduced by Adam Navrowski.
+
+## Album-cover screensaver
+
+Define `USE_COVER_SCREENSAVER` in `myoptions.h` to use the current album cover
+as the non-blank **While playing** screensaver. It displays the current artist
+and track alongside the time, date, nameday and weather. When no downloaded
+cover is available, the normal station or source image is used instead.
+
+This option currently requires a 480 x 320 display and PSRAM. It cannot be
+enabled together with `USE_CASSETTE_SCREENSAVER`; select one of the two styles
+at build time. The album-cover screensaver was created and contributed by
+Volodimyr Zagranichniy.
 
 ## Cassette screensaver
 
@@ -263,7 +303,8 @@ To add logos for your own stations, see the
 - 4D Systems gen4-ESP32-35CT board support by Révész Tamás
 - Reintroduction of `IMPERIALUNIT` weather-unit support by Adam Navrowski
 - Cassette screensaver concept and original prototype by Adam Navrowski
-- Improved Last.fm fallback-search concept by Volodimyr
+- Full-screen album-cover screensaver, multilingual cover matching and
+  backlight/Wi-Fi hardware tuning by Volodimyr Zagranichniy
 - Smaller-display and selectable-screensaver community MOD by Scott Barber
 - FusionEdge development by SimZs and contributors
 

@@ -38,6 +38,8 @@
 //#define TFT_MISO 19
 
 #define BRIGHTNESS_PIN 14
+// #define BRIGHTNESS_PWM_FREQUENCY 4500
+// #define WIFI_TX_POWER WIFI_POWER_11dBm
 
 /* Touch panel - disabled in this tested example. */
 //#define TS_MODEL TS_MODEL_XPT2046

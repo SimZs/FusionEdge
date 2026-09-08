@@ -2,7 +2,7 @@
 #define options_h
 #pragma once
 
-#define FW_VERSION "1.0.9"
+#define FW_VERSION "1.0.10"
 
 #ifndef THEME_CSV_VERSION
 #    define THEME_CSV_VERSION "0.0.1"
@@ -16,6 +16,10 @@ STORE YOUR SETTINGS IN THE *** myoptions.h *** FILE.
 
 #if __has_include("../../myoptions.h")
 #    include "../../myoptions.h" /* <- write your variable values here */
+#endif
+
+#if defined(USE_CASSETTE_SCREENSAVER) && defined(USE_COVER_SCREENSAVER)
+#    error "Choose either USE_CASSETTE_SCREENSAVER or USE_COVER_SCREENSAVER"
 #endif
 
 #if __has_include("../../mytheme.h")
@@ -217,6 +221,9 @@ STORE YOUR SETTINGS IN THE *** myoptions.h *** FILE.
 #ifndef BTN_MODE
   #define BTN_MODE             255
 #endif
+#ifndef BTN_RGB
+  #define BTN_RGB              255
+#endif
 #ifndef BTN_INTERNALPULLUP
   #define BTN_INTERNALPULLUP    true
 #endif
@@ -335,6 +342,12 @@ STORE YOUR SETTINGS IN THE *** myoptions.h *** FILE.
 #endif
 #ifndef BRIGHTNESS_PIN
   #define BRIGHTNESS_PIN 255   // BRIGHTNESS Pin
+#endif
+#ifndef BRIGHTNESS_PWM_FREQUENCY
+  #define BRIGHTNESS_PWM_FREQUENCY 4500  // Backlight PWM frequency in Hz
+#endif
+#ifndef WIFI_TX_POWER
+  #define WIFI_TX_POWER WIFI_POWER_15dBm // Maximum WiFi transmit power
 #endif
 #ifndef PLAYER_FORCE_MONO
   #define PLAYER_FORCE_MONO      false  // mono option - false stereo, true mono

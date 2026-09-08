@@ -180,7 +180,7 @@ struct config_t {
     /*----- LED STRIP -----*/
     uint8_t  lsEnabled;     // 0=ki, 1=be
     uint8_t  lsSsEnabled;  // fut screensaver alatt is
-    uint8_t  lsModel;      // 0=VU, 1=Rainbow, 2=Fire, 3=Meter
+    uint8_t  lsModel;      // 0=VU, 1=Rainbow Flow, 2=Sparkle, 3=Meter VU
     uint8_t  lsBrightness; // 0..100 (%)
     uint8_t  lsCount;      // LED-ek száma (default 24)
     bool     shortWeather;
@@ -386,7 +386,7 @@ class Config {
 #endif
     void     initSDPlaylist();
     void     changeMode(int newmode = -1);
-    void     toggleMode(); // DLNA mod: WEB→DLNA→SD→WEB ciklus
+    void     toggleMode(); // Available playback modes in WEB→DLNA→SD→BT order
     uint16_t playlistLength();
     uint16_t lastStation() {
 #ifdef USE_SD
@@ -423,6 +423,7 @@ class Config {
     void     doSleepW();
     void     setSnuffle(bool sn);
     uint8_t  getMode() { return store.play_mode /* & 0b11*/; }
+    bool     isPlaybackActive() const;
     void     initPlaylistMode();
     void     reset();
     void     enableScreensaver(bool val);

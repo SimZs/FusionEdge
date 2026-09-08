@@ -29,8 +29,12 @@
 // #define USE_LASTFM_COVER
 // #define LASTFM_API_KEY "your_lastfm_api_key"
 
+// Full-screen album cover and track information for the "While playing" screensaver.
+// Requires a 480x320 display and PSRAM. Enable USE_LASTFM_COVER for downloaded covers.
+#define USE_COVER_SCREENSAVER
+
 // Animated cassette replaces the clock during the non-blank "While playing" screensaver.
-#define USE_CASSETTE_SCREENSAVER
+// #define USE_CASSETTE_SCREENSAVER
 // #define CASSETTE_FRAME_MS 100UL // Reel animation interval; lower values increase display load.
 // #define CASSETTE_PNG_PATH "/images/screensaver/retro_audio_cassette.png"      // Silver/green cassette.
 // #define CASSETTE_PNG_PATH "/images/screensaver/retro_audio_cassette_blue.png" // Blue/pink cassette.
@@ -73,6 +77,8 @@ Supported languages: HU, PL, NL, GR, DE (UA Local/namedays/namedays_UA.h is not 
 #define TFT_D3         39
 #define TFT_RST        -1
 #define BRIGHTNESS_PIN 1
+// #define BRIGHTNESS_PWM_FREQUENCY 4500
+// #define WIFI_TX_POWER WIFI_POWER_11dBm
 #define USE_BUILTIN_LED false  // IMPORTANT ! MUST be "false" for JC3248W535 module
 #endif
 

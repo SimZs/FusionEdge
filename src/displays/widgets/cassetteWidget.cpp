@@ -564,7 +564,7 @@ void CassetteWidget::loop() {
     _refreshAudioInfo();
 
     const uint32_t now = millis();
-    if (!player.isRunning() || now - _lastAnimMs < CASSETTE_FRAME_MS) { return; }
+    if (!config.isPlaybackActive() || now - _lastAnimMs < CASSETTE_FRAME_MS) { return; }
     _lastAnimMs = now;
     _phase = (_phase + 1) % 360;
     _drawReels();

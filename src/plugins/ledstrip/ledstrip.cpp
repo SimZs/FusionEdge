@@ -6,6 +6,9 @@
 #include "../../core/player.h"
 #include "../../core/network.h"
 #include "../../core/display.h"
+#ifdef USE_BLUETOOTH
+#include "../../core/bluetooth.h"
+#endif
 #include "driver/gpio.h"
 
 
@@ -894,7 +897,15 @@ static void renderPlay() {
 
 static void updateModeFromRuntime() {
   if (isScreensaverMode()) {
-    g_mode = LM_SCREENSAVER;
+    bool audiblePlayback = config.isPlaybackActive();
+#ifdef USE_BLUETOOTH
+    if (config.getMode() != PM_BLUETOOTH) {
+      audiblePlayback = audiblePlayback && config.store.volume > 0;
+    }
+#else
+    audiblePlayback = audiblePlayback && config.store.volume > 0;
+#endif
+    g_mode = (config.store.lsSsEnabled && audiblePlayback) ? LM_PLAY : LM_SCREENSAVER;
     return;
   }
 
@@ -902,6 +913,13 @@ static void updateModeFromRuntime() {
     g_mode = LM_VOLUME;
     return;
   }
+
+#ifdef USE_BLUETOOTH
+  if (config.getMode() == PM_BLUETOOTH) {
+    g_mode = (bluetooth.bridgeRunning() && bluetooth.audioActive()) ? LM_PLAY : LM_STOP;
+    return;
+  }
+#endif
 
   if (network.status != CONNECTED && network.status != SDREADY) {
     g_mode = LM_CONNECTING;

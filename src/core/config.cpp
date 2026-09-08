@@ -35,6 +35,15 @@ Config config;
 QueueHandle_t irQueue = nullptr;
 #endif
 
+bool Config::isPlaybackActive() const {
+    if (player.isRunning()) return true;
+#ifdef USE_BLUETOOTH
+    return store.play_mode == PM_BLUETOOTH && bluetooth.audioActive();
+#else
+    return false;
+#endif
+}
+
 namespace {
 
 bool equalsIgnoreCase(const char* a, const char* b) {
@@ -351,57 +360,80 @@ void Config::_setupVersion() {
 }
 
 void Config::toggleMode() {
-
 #ifdef USE_DLNA
+    auto activateWebPlaylist = [this](uint8_t source, uint16_t station) {
+        const bool wasPlaying = player.isRunning() || player.status() == PLAYING || player.wantsPlayback();
+        saveValue(&store.playlistSource, source, true, true);
+        initPlaylistMode();
+        if (wasPlaying) { player.sendCommand({PR_PLAY, (int)station}); }
 
-    // --- WEB módban vagyunk ---
-    if (getMode() == PM_WEB) {
+        display.purgeQueuedRequestType(NEWMODE);
+        display.purgeQueuedRequestType(NEWSTATION);
+        display.purgeQueuedRequestType(DBITRATE);
+        display.putRequest(NEWMODE, PLAYER);
+        display.putRequest(NEWSTATION);
+        display.putRequest(DBITRATE);
+        netserver.requestOnChange(GETINDEX, 0);
+        netserver.requestOnChange(GETPLAYERMODE, 0);
+    };
 
-        if (store.playlistSource == PL_SRC_WEB) {
-
-            // WEB → DLNA
-            bool pir = player.isRunning();
-            uint8_t oldSrc = store.playlistSource;
-            store.playlistSource = (uint8_t)PL_SRC_DLNA;
-
-            if (playlistLength() == 0) {
-                // Nincs DLNA playlist még – maradunk WEB-en, nem ugrunk SD-re
-                store.playlistSource = oldSrc;
-                Serial.println("[MODE] WEB->DLNA: no DLNA playlist yet, staying on WEB");
-                return;
-            }
-
-            saveValue(&store.playlistSource, (uint8_t)PL_SRC_DLNA, true, true);
-
-            initPlaylistMode();
-
-            if (pir) { player.sendCommand({PR_PLAY, (int)store.lastDlnaStation}); }
-
-            display.purgeQueuedRequestType(NEWMODE);
-            display.purgeQueuedRequestType(NEWSTATION);
-            display.purgeQueuedRequestType(DBITRATE);
-            display.putRequest(NEWMODE, PLAYER);
-            display.putRequest(NEWSTATION);
-            display.putRequest(DBITRATE);
+    if (getMode() == PM_WEB && store.playlistSource == PL_SRC_WEB) {
+        const uint8_t oldSource = store.playlistSource;
+        store.playlistSource = PL_SRC_DLNA;
+        const bool hasDlnaPlaylist = playlistLength() > 0;
+        store.playlistSource = oldSource;
+        if (hasDlnaPlaylist) {
+            activateWebPlaylist(PL_SRC_DLNA, store.lastDlnaStation);
             return;
         }
-        else {
-            // DLNA → SD
+        log_i("##[MODE]# DLNA skipped: playlist is empty");
+    } else if (getMode() == PM_WEB && store.playlistSource == PL_SRC_DLNA) {
+#ifdef USE_SD
+        if (SDC_CS != 255) {
             changeMode(PM_SDCARD);
             return;
         }
-    }
-
-    // --- SD → WEB ---
-    store.playlistSource = PL_SRC_WEB;
-    saveValue(&store.playlistSource, (uint8_t)PL_SRC_WEB, true, true);
-    changeMode(PM_WEB);
-
+#endif
+#ifdef USE_BLUETOOTH
+        changeMode(PM_BLUETOOTH);
+        return;
 #else
+        activateWebPlaylist(PL_SRC_WEB, store.lastStation);
+        return;
+#endif
+    }
+#endif
 
-    // DLNA nincs → sima toggle
-    changeMode(getMode() == PM_SDCARD ? PM_WEB : PM_SDCARD);
+#ifdef USE_SD
+    if (getMode() == PM_WEB && SDC_CS != 255) {
+        changeMode(PM_SDCARD);
+        return;
+    }
+    if (getMode() == PM_SDCARD) {
+#ifdef USE_BLUETOOTH
+        changeMode(PM_BLUETOOTH);
+#else
+#ifdef USE_DLNA
+        saveValue(&store.playlistSource, (uint8_t)PL_SRC_WEB, true, true);
+#endif
+        changeMode(PM_WEB);
+#endif
+        return;
+    }
+#endif
 
+#ifdef USE_BLUETOOTH
+    if (getMode() == PM_BLUETOOTH) {
+#ifdef USE_DLNA
+        saveValue(&store.playlistSource, (uint8_t)PL_SRC_WEB, true, true);
+#endif
+        changeMode(PM_WEB);
+        return;
+    }
+    if (getMode() == PM_WEB) {
+        changeMode(PM_BLUETOOTH);
+        return;
+    }
 #endif
 }
 
@@ -436,7 +468,15 @@ void Config::changeMode(int newmode) { // DLNA mod
     if (newmode == PM_BLUETOOTH) { return; }
 #endif
 
-    bool pir = player.isRunning();
+    const uint8_t oldMode = getMode();
+    bool pir = player.isRunning() || player.status() == PLAYING || player.wantsPlayback();
+#ifdef USE_BLUETOOTH
+    if (oldMode == PM_BLUETOOTH) {
+        // The bridge is already the active playback path immediately after boot,
+        // before the module has reported enough state for audioActive().
+        pir = pir || bluetooth.audioActive() || bluetooth.bridgeRunningOrPending();
+    }
+#endif
 
 #ifdef USE_SD
     if (SDC_CS == 255 && newmode == PM_SDCARD) { return; }
@@ -454,7 +494,11 @@ void Config::changeMode(int newmode) { // DLNA mod
 
     /* === BT módból kilépés: híd leállítása === */
 #ifdef USE_BLUETOOTH
-    if (getMode() == PM_BLUETOOTH && newmode != PM_BLUETOOTH) {
+    if (oldMode == PM_BLUETOOTH && newmode != PM_BLUETOOTH) {
+        // AT+PU is an explicit pause command, so it is safe even if the last
+        // asynchronous BT_PA status or VU sample has not arrived yet.
+        bluetooth.pause();
+        log_i("##[BT]# source pause sent on mode exit");
         bluetooth.stopBridge();
         log_i("##[BT]# bridge stopped (mode change -> %d)", newmode);
     }
@@ -505,7 +549,6 @@ void Config::changeMode(int newmode) { // DLNA mod
             // spi_lock_callback BT módban automatikusan no-op (lásd main.cpp),
             // tehát PR_STOP alatt nincs display.lock() → nem fagy be a display.
             player.sendCommand({PR_STOP, 0});
-            delay(300);
         }
     }
 #endif
@@ -753,6 +796,7 @@ void Config::_initHW() {
 #if BRIGHTNESS_PIN != 255
     gpio_hold_dis((gpio_num_t)BRIGHTNESS_PIN); // ← add (MB)
     pinMode(BRIGHTNESS_PIN, OUTPUT);
+    analogWriteFrequency(BRIGHTNESS_PIN, BRIGHTNESS_PWM_FREQUENCY);
     // Keep backlight off during display controller init to avoid boot flash.
     analogWrite(BRIGHTNESS_PIN, 0);
 #endif
@@ -2259,7 +2303,7 @@ void Config::bootInfo() {
     BOOTLOG("flipscreen:\t%s", store.flipscreen ? "true" : "false");
     BOOTLOG("invertdisplay:\t%s", store.invertdisplay ? "true" : "false");
     BOOTLOG("showweather:\t%s", store.showweather ? "true" : "false");
-    BOOTLOG("buttons:\tleft=%d, center=%d, right=%d, up=%d, down=%d, mode=%d, pullup=%s", BTN_LEFT, BTN_CENTER, BTN_RIGHT, BTN_UP, BTN_DOWN, BTN_MODE, BTN_INTERNALPULLUP ? "true" : "false");
+    BOOTLOG("buttons:\tleft=%d, center=%d, right=%d, up=%d, down=%d, mode=%d, rgb=%d, pullup=%s", BTN_LEFT, BTN_CENTER, BTN_RIGHT, BTN_UP, BTN_DOWN, BTN_MODE, BTN_RGB, BTN_INTERNALPULLUP ? "true" : "false");
     BOOTLOG("encoders:\tl1=%d, b1=%d, r1=%d, pullup=%s, l2=%d, b2=%d, r2=%d, pullup=%s", ENC_BTNL, ENC_BTNB, ENC_BTNR, ENC_INTERNALPULLUP ? "true" : "false", ENC2_BTNL, ENC2_BTNB, ENC2_BTNR,
             ENC2_INTERNALPULLUP ? "true" : "false");
     BOOTLOG("ir:\t\t%d", IR_PIN);

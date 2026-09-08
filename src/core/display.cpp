@@ -21,6 +21,9 @@
 #include "fonts.h"
 #include "speaker_bitmaps.h"
 #include "freertos/semphr.h"
+#ifdef NAMEDAYS_FILE
+#    include "namedays.h"
+#endif
 #if BRIGHTNESS_PIN != 255
 #    include "../plugins/backlight/backlight.h"
 #endif
@@ -258,6 +261,9 @@ Display::~Display() {
     delete _title1;
     delete _title2;
     delete _plcurrent;
+#ifdef USE_COVER_SCREENSAVER
+    delete _coverScreensaverWidget;
+#endif
 }
 
 void Display::init() {
@@ -476,6 +482,12 @@ void Display::_buildPager() {
     _cassettewidget->lock(true);
     pages[PG_SCREENSAVER]->addWidget(_cassettewidget);
 #    endif
+#    ifdef USE_COVER_SCREENSAVER
+    _coverScreensaverWidget = new CoverScreensaverWidget();
+    _coverScreensaverWidget->init({0, 0, 0, WA_LEFT}, config.theme.background);
+    _coverScreensaverWidget->lock(true);
+    pages[PG_SCREENSAVER]->addWidget(_coverScreensaverWidget);
+#    endif
     pages[PG_SCREENSAVER]->addWidget(_clock);
     pages[PG_PLAYER]->addPage(_footer);
     // _metabackground NEM kerül PG_DIALOG-ra (SDCHANGE overlay-nél nem kell a vonal)
@@ -589,6 +601,11 @@ void Display::_refreshThemeColors() {
         _cassettewidget->setTextColors(config.theme.title1, config.theme.title2);
     }
 #    endif
+#    ifdef USE_COVER_SCREENSAVER
+    if (_coverScreensaverWidget) {
+        _coverScreensaverWidget->setColors(config.theme.date, config.theme.background);
+    }
+#    endif
     if (_metabackground) { _metabackground->setColors(config.theme.metafill, config.theme.metafill); }
     if (_weather) { _weather->setColors(config.theme.weather, config.theme.background); }
     if (_nums) { _nums->setColors(config.theme.digit, config.theme.background); }
@@ -634,6 +651,12 @@ void Display::_swichMode(displayMode_e newmode) {
 #    ifdef USE_CASSETTE_SCREENSAVER
         if (prevMode == SCREENSAVER || prevMode == SCREENBLANK) {
             if (_cassettewidget) { _cassettewidget->lock(true); }
+            if (_clock) { _clock->unlock(); }
+        }
+#    endif
+#    ifdef USE_COVER_SCREENSAVER
+        if (prevMode == SCREENSAVER || prevMode == SCREENBLANK) {
+            if (_coverScreensaverWidget) { _coverScreensaverWidget->lock(true); }
             if (_clock) { _clock->unlock(); }
         }
 #    endif
@@ -696,7 +719,7 @@ void Display::_swichMode(displayMode_e newmode) {
         eqForceClose();
         config.isScreensaver = true;
 #    ifdef USE_CASSETTE_SCREENSAVER
-        const bool showCassette = newmode == SCREENSAVER && player.isRunning();
+        const bool showCassette = newmode == SCREENSAVER && config.isPlaybackActive();
         _clockScreensaverBrightnessActive = newmode == SCREENSAVER && !showCassette;
         if (_cassettewidget) { _cassettewidget->lock(!showCassette); }
         if (_clock) {
@@ -707,14 +730,38 @@ void Display::_swichMode(displayMode_e newmode) {
                 _clock->lock(true);
             }
         }
+#    elif defined(USE_COVER_SCREENSAVER)
+        const bool showCover = newmode == SCREENSAVER && config.isPlaybackActive() &&
+                               _coverScreensaverWidget && _coverScreensaverWidget->ready();
+        _clockScreensaverBrightnessActive = newmode == SCREENSAVER && !showCover;
+        if (_coverScreensaverWidget) { _coverScreensaverWidget->lock(!showCover); }
+        if (_clock) {
+            if (newmode == SCREENSAVER && !showCover) {
+                _clock->setZoom(2.0f);
+                _clock->unlock();
+            } else {
+                _clock->lock(true);
+            }
+        }
+        if (showCover) {
+            _updateCoverScreensaverText();
+            _updateCoverScreensaver();
+            _time(true);
+            if (timekeeper.weatherIcon[0] != '\0') {
+                _coverScreensaverWidget->setWeather(timekeeper.weatherIcon, timekeeper.tempC);
+            }
+        }
 #    else
         _clockScreensaverBrightnessActive = newmode == SCREENSAVER;
         if (newmode == SCREENSAVER) { _clock->setZoom(2.0f); }
 #    endif
         _pager->setPage(pages[PG_SCREENSAVER]);
         if (newmode == SCREENBLANK) {
-#    ifndef USE_CASSETTE_SCREENSAVER
+#    if !defined(USE_CASSETTE_SCREENSAVER) && !defined(USE_COVER_SCREENSAVER)
             _clock->clear();
+#    endif
+#    ifdef USE_COVER_SCREENSAVER
+            if (_coverScreensaverWidget) { _coverScreensaverWidget->lock(true); }
 #    endif
             config.setDspOn(false, false);
         } else if (_clockScreensaverBrightnessActive) {
@@ -965,9 +1012,18 @@ void Display::loop() {
                         _title();
                         _updateStationIcon();
                     }
+#ifdef USE_COVER_SCREENSAVER
+                    else if (_mode == SCREENSAVER) {
+                        _title();
+                        _updateCoverScreensaver();
+                    }
+#endif
                     break;
                 case NEWCOVER:
                     if (_mode == PLAYER) { _updateStationIcon(); }
+#ifdef USE_COVER_SCREENSAVER
+                    else if (_mode == SCREENSAVER) { _updateCoverScreensaver(); }
+#endif
                     break;
                 case PLAYERREBUILD:
                     if (request.payload > 0 && request.payload != config.lastStation()) {
@@ -1012,6 +1068,13 @@ void Display::loop() {
                         _station();
                         _updateStationIcon();
                     }
+#ifdef USE_COVER_SCREENSAVER
+                    else if (_mode == SCREENSAVER) {
+                        _station();
+                        _updateCoverScreensaverText();
+                        _updateCoverScreensaver();
+                    }
+#endif
                     break;
                 case NEXTSTATION:
                     if (_mode == NUMBERS) { _drawNextStationNum(request.payload); }
@@ -1089,6 +1152,11 @@ void Display::loop() {
                     if (_weatherIcon && timekeeper.weatherIcon[0] != '\0') {
                         _weatherIcon->setWeather(timekeeper.weatherIcon, timekeeper.tempC);
                     }
+#ifdef USE_COVER_SCREENSAVER
+                    if (_coverScreensaverWidget && timekeeper.weatherIcon[0] != '\0') {
+                        _coverScreensaverWidget->setWeather(timekeeper.weatherIcon, timekeeper.tempC);
+                    }
+#endif
                     if (_weather && timekeeper.weatherBuf) {
                         _weather->resetText(); // short/long váltáskor az oldtext cache-t invalidáljuk
                         _weather->setText(timekeeper.weatherBuf);
@@ -1140,10 +1208,35 @@ void Display::loop() {
                     }
                     displayContentChanging = false;
                     _layoutChange(true);
+#ifdef USE_COVER_SCREENSAVER
+                    if (_mode == SCREENSAVER && _coverScreensaverWidget && _coverScreensaverWidget->ready()) {
+                        if (_clockScreensaverBrightnessActive && config.store.dspon) {
+                            setBrightnessPercent(config.store.brightness);
+                        }
+                        _clockScreensaverBrightnessActive = false;
+                        _updateCoverScreensaverText();
+                        _updateCoverScreensaver();
+                        if (timekeeper.weatherIcon[0] != '\0') {
+                            _coverScreensaverWidget->setWeather(timekeeper.weatherIcon, timekeeper.tempC);
+                        }
+                        _clock->lock(true);
+                        _coverScreensaverWidget->lock(false);
+                        _time(true);
+                    }
+#endif
                     break;
                 case PSTOP:
                     _layoutChange(false);
                     displayContentChanging = false;
+#ifdef USE_COVER_SCREENSAVER
+                    if (_mode == SCREENSAVER && _coverScreensaverWidget) {
+                        _coverScreensaverWidget->lock(true);
+                        _clockScreensaverBrightnessActive = true;
+                        _clock->setZoom(2.0f);
+                        _clock->lock(false);
+                        setBrightnessPercent(effectiveBrightnessPercent(config.store.brightness));
+                    }
+#endif
                     break;
                 case DSP_START: _start(); break;
 
@@ -1261,6 +1354,54 @@ void Display::_updateStationIcon() {
     _stationIcon->setStation(iconLookupName, pm);
 }
 
+#ifdef USE_COVER_SCREENSAVER
+void Display::_updateCoverScreensaver() {
+    if (!_coverScreensaverWidget) return;
+
+#ifdef USE_LASTFM_COVER
+    uint8_t* coverData = nullptr;
+    size_t coverSize = 0;
+    bool coverIsJpeg = false;
+    uint32_t coverGeneration = 0;
+    if (coverArt.copyReadyFor(config.station.title,
+                              config.getMode() == PM_BLUETOOTH,
+                              coverData, coverSize,
+                              coverIsJpeg, coverGeneration)) {
+        _coverScreensaverWidget->setCover(coverData, coverSize,
+                                          coverIsJpeg, coverGeneration);
+        return;
+    }
+#endif
+
+    const uint8_t playMode = (config.getMode() == PM_SDCARD) ? DPS_SDCARD
+                           : (config.getMode() == PM_BLUETOOTH) ? DPS_BLUETOOTH
+                           : (config.store.playlistSource == PL_SRC_DLNA) ? DPS_DLNA
+                                                                          : DPS_WEB;
+    const char* iconLookupName = (config.getMode() == PM_BLUETOOTH)
+        ? ""
+        : (config.station.iconName[0] != '\0') ? config.station.iconName
+                                                : config.station.name;
+    _coverScreensaverWidget->setStation(iconLookupName, playMode);
+}
+
+void Display::_updateCoverScreensaverText() {
+    if (!_coverScreensaverWidget) return;
+
+    char title[BUFLEN];
+    strlcpy(title, config.station.title[0] ? config.station.title
+                                          : config.station.name,
+            sizeof(title));
+    char* track = strstr(title, " - ");
+    if (track) {
+        *track = '\0';
+        track += 3;
+        _coverScreensaverWidget->setTrack(title, track);
+    } else {
+        _coverScreensaverWidget->setTrack("", title);
+    }
+}
+#endif
+
 char* split(char* str, const char* delim) {
     char* dmp = strstr(str, delim);
     if (dmp == NULL) { return NULL; }
@@ -1291,6 +1432,9 @@ void Display::_title() {
         _title1->setText("");
         if (_title2) { _title2->setText(""); }
     }
+#ifdef USE_COVER_SCREENSAVER
+    _updateCoverScreensaverText();
+#endif
     // New metadata should be able to pre-empt weather scrolling.
     ScrollWidget::releaseScrollOwner();
     if (player_on_track_change) { player_on_track_change(); }
@@ -1315,6 +1459,17 @@ void Display::_time(bool redraw) {
         }
     }
 #    endif
+#ifdef USE_COVER_SCREENSAVER
+    if (_mode == SCREENSAVER && _coverScreensaverWidget &&
+        !_coverScreensaverWidget->locked()) {
+        char timeBuffer[8];
+        snprintf(timeBuffer, sizeof(timeBuffer), "%02d:%02d",
+                 displayTime.tm_hour, displayTime.tm_min);
+        _coverScreensaverWidget->setTime(timeBuffer);
+        _ssUpdateDate();
+        return;
+    }
+#endif
     if (_clock && _clock->locked()) return;   // EQ / VOL overlay aktív — ne rajzoljon felé
     if (config.isScreensaver) {
         _ssUpdateDate();
@@ -1352,6 +1507,24 @@ void Display::_ssUpdateDate() {
         case 3:  snprintf(datebuf, sizeof(datebuf), "%s - %02d. %s. %04d", LANG::dowf[displayTime.tm_wday], displayTime.tm_mday, LANG::mnths[displayTime.tm_mon], displayTime.tm_year+1900); break;
         default: snprintf(datebuf, sizeof(datebuf), "%s - %02d. %s. %d",   LANG::dowf[displayTime.tm_wday], displayTime.tm_mday, LANG::mnths[displayTime.tm_mon], displayTime.tm_year+1900); break;
     }
+#ifdef USE_COVER_SCREENSAVER
+    if (_coverScreensaverWidget) {
+        char coverDate[192];
+        strlcpy(coverDate, datebuf, sizeof(coverDate));
+#    ifdef NAMEDAYS_FILE
+        if (config.store.nameday) {
+            char nameday[128] = {};
+            if (namedays_get_str(static_cast<uint8_t>(displayTime.tm_mon + 1),
+                                  static_cast<uint8_t>(displayTime.tm_mday),
+                                  nameday, sizeof(nameday)) && nameday[0]) {
+                strlcat(coverDate, "  |  ", sizeof(coverDate));
+                strlcat(coverDate, nameday, sizeof(coverDate));
+            }
+        }
+#    endif
+        _coverScreensaverWidget->setDate(coverDate);
+    }
+#endif
     _clock->setSsDate(datebuf);
 }
 

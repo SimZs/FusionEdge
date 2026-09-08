@@ -392,7 +392,8 @@ void TimeKeeper::_upClock() {
 
 void TimeKeeper::_upScreensaver() {
     if (!display.ready()) { return; }
-    if (config.store.screensaverEnabled && display.mode() == PLAYER && (!player.isRunning() || config.store.volume == 0)) { // "PWR_AMP"
+    const bool playbackActive = config.isPlaybackActive();
+    if (config.store.screensaverEnabled && display.mode() == PLAYER && (!playbackActive || config.store.volume == 0)) { // "PWR_AMP"
         config.screensaverTicks++;
         if (config.screensaverTicks > config.store.screensaverTimeout + SCREENSAVERSTARTUPDELAY) {
 #if PWR_AMP != 255 // "PWR_AMP"
@@ -406,7 +407,7 @@ void TimeKeeper::_upScreensaver() {
             config.screensaverTicks = SCREENSAVERSTARTUPDELAY;
         }
     }
-    if (config.store.screensaverPlayingEnabled && display.mode() == PLAYER && player.isRunning()) {
+    if (config.store.screensaverPlayingEnabled && display.mode() == PLAYER && playbackActive) {
         config.screensaverPlayingTicks++;
         if (config.screensaverPlayingTicks > config.store.screensaverPlayingTimeout + SCREENSAVERSTARTUPDELAY) {
             if (config.store.screensaverPlayingBlank) {

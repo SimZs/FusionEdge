@@ -58,6 +58,11 @@ class BluetoothPlayer {
     bool startBridge();
     void stopBridge();
     bool bridgeRunning() const { return _bridgeTaskHandle != nullptr; }
+    bool bridgeRunningOrPending() const { return _bridgeTaskHandle != nullptr || _bridgeStartPending; }
+    bool audioActive() const { return playing() || _vuLeft > 0 || _vuRight > 0; }
+    uint16_t vuLevel() const {
+        return (static_cast<uint16_t>(_vuRight) << 8) | _vuLeft;
+    }
 
   private:
     void sendAT(const char* cmd);
@@ -71,6 +76,7 @@ class BluetoothPlayer {
 
     static void bridgeTaskWrapper(void* param);
     void        bridgeTask();
+    bool        startBridgeNow();
 
     HardwareSerial _uart{2};
     char           _lineBuf[256] = {0};
@@ -94,8 +100,11 @@ class BluetoothPlayer {
     i2s_chan_handle_t _rxHandle          = nullptr;
     TaskHandle_t      _bridgeTaskHandle  = nullptr;
     volatile bool     _bridgeStopRequest = false;
+    volatile bool     _bridgeStartPending = false;
     volatile uint32_t _requestedSampleRate = 0;
     uint32_t          _bridgeSampleRate = 0;
+    volatile uint8_t  _vuLeft = 0;
+    volatile uint8_t  _vuRight = 0;
 };
 
 extern BluetoothPlayer bluetooth;

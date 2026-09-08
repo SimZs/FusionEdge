@@ -17,7 +17,7 @@
 namespace {
 
 constexpr size_t API_RESPONSE_LIMIT = 96 * 1024;
-constexpr size_t COVER_IMAGE_LIMIT  = 256 * 1024;
+constexpr size_t COVER_IMAGE_LIMIT  = 512 * 1024;
 constexpr size_t MUSICBRAINZ_CANDIDATE_LIMIT = 6;
 constexpr uint32_t REQUEST_SETTLE_MS = 3000;
 constexpr uint32_t MUSICBRAINZ_INTERVAL_MS = 1100;
@@ -91,6 +91,16 @@ class PsramBufferStream : public Stream {
 
 class CooperativeNetworkClient : public NetworkClient {
   public:
+    int connect(IPAddress ip, uint16_t port, int32_t timeoutMs) override {
+        if (!_serviceNetwork()) return 0;
+        return NetworkClient::connect(ip, port, _boundedConnectTimeout(timeoutMs));
+    }
+
+    int connect(const char* host, uint16_t port, int32_t timeoutMs) override {
+        if (!_serviceNetwork()) return 0;
+        return NetworkClient::connect(host, port, _boundedConnectTimeout(timeoutMs));
+    }
+
     int available() override {
         if (!_serviceNetwork()) return 0;
         return NetworkClient::available();
@@ -115,8 +125,15 @@ class CooperativeNetworkClient : public NetworkClient {
     }
 
   private:
+    static int32_t _boundedConnectTimeout(int32_t requestedMs) {
+        constexpr int32_t maxCoverConnectMs = 3000;
+        return requestedMs <= 0 || requestedMs > maxCoverConnectMs
+            ? maxCoverConnectMs
+            : requestedMs;
+    }
+
     bool _serviceNetwork() {
-        if (coverArt.networkPaused()) {
+        if (coverArt.networkPaused() || WiFi.status() != WL_CONNECTED) {
             NetworkClient::stop();
             return false;
         }
@@ -145,6 +162,110 @@ char* trim(char* text) {
     return text;
 }
 
+bool readUtf8CodePoint(const char*& input, uint32_t& codePoint) {
+    const auto* bytes = reinterpret_cast<const unsigned char*>(input);
+    if (bytes[0] < 0x80) {
+        codePoint = bytes[0];
+        ++input;
+        return true;
+    }
+
+    size_t length = 0;
+    uint32_t value = 0;
+    if ((bytes[0] & 0xE0) == 0xC0) {
+        length = 2;
+        value = bytes[0] & 0x1F;
+    } else if ((bytes[0] & 0xF0) == 0xE0) {
+        length = 3;
+        value = bytes[0] & 0x0F;
+    } else if ((bytes[0] & 0xF8) == 0xF0) {
+        length = 4;
+        value = bytes[0] & 0x07;
+    } else {
+        codePoint = bytes[0];
+        ++input;
+        return false;
+    }
+
+    for (size_t index = 1; index < length; ++index) {
+        if (bytes[index] == 0 || (bytes[index] & 0xC0) != 0x80) {
+            codePoint = bytes[0];
+            ++input;
+            return false;
+        }
+        value = (value << 6) | (bytes[index] & 0x3F);
+    }
+
+    const bool overlong = (length == 2 && value < 0x80) ||
+                          (length == 3 && value < 0x800) ||
+                          (length == 4 && value < 0x10000);
+    if (overlong || value > 0x10FFFF || (value >= 0xD800 && value <= 0xDFFF)) {
+        codePoint = bytes[0];
+        ++input;
+        return false;
+    }
+
+    codePoint = value;
+    input += length;
+    return true;
+}
+
+size_t utf8CodePointSize(uint32_t codePoint) {
+    if (codePoint < 0x80) return 1;
+    if (codePoint < 0x800) return 2;
+    if (codePoint < 0x10000) return 3;
+    return 4;
+}
+
+void appendUtf8CodePoint(uint32_t codePoint, char* output, size_t& out) {
+    if (codePoint < 0x80) {
+        output[out++] = static_cast<char>(codePoint);
+    } else if (codePoint < 0x800) {
+        output[out++] = static_cast<char>(0xC0 | (codePoint >> 6));
+        output[out++] = static_cast<char>(0x80 | (codePoint & 0x3F));
+    } else if (codePoint < 0x10000) {
+        output[out++] = static_cast<char>(0xE0 | (codePoint >> 12));
+        output[out++] = static_cast<char>(0x80 | ((codePoint >> 6) & 0x3F));
+        output[out++] = static_cast<char>(0x80 | (codePoint & 0x3F));
+    } else {
+        output[out++] = static_cast<char>(0xF0 | (codePoint >> 18));
+        output[out++] = static_cast<char>(0x80 | ((codePoint >> 12) & 0x3F));
+        output[out++] = static_cast<char>(0x80 | ((codePoint >> 6) & 0x3F));
+        output[out++] = static_cast<char>(0x80 | (codePoint & 0x3F));
+    }
+}
+
+uint32_t lowerComparisonCodePoint(uint32_t codePoint) {
+    if (codePoint >= 'A' && codePoint <= 'Z') return codePoint + ('a' - 'A');
+    if (codePoint >= 0x0410 && codePoint <= 0x042F) return codePoint + 0x20;
+
+    switch (codePoint) {
+        case 0x0401: return 0x0451; // Cyrillic IO
+        case 0x0404: return 0x0454; // Ukrainian IE
+        case 0x0406: return 0x0456; // Ukrainian I
+        case 0x0407: return 0x0457; // Ukrainian YI
+        case 0x040E: return 0x045E; // Cyrillic short U
+        case 0x0490: return 0x0491; // Ukrainian GHE with upturn
+        default: return codePoint;
+    }
+}
+
+bool isComparisonSeparator(uint32_t codePoint) {
+    if (codePoint < 0x80) {
+        return isspace(static_cast<unsigned char>(codePoint)) ||
+               ispunct(static_cast<unsigned char>(codePoint));
+    }
+
+    return codePoint == 0x00A0 || codePoint == 0x00A9 || codePoint == 0x00AB ||
+           codePoint == 0x00AE || codePoint == 0x00B7 || codePoint == 0x00BB ||
+           (codePoint >= 0x2000 && codePoint <= 0x200B) ||
+           (codePoint >= 0x2010 && codePoint <= 0x2027) ||
+           (codePoint >= 0x2032 && codePoint <= 0x2037) ||
+           codePoint == 0x2039 || codePoint == 0x203A || codePoint == 0x2043 ||
+           codePoint == 0x202F || codePoint == 0x205F || codePoint == 0x2122 ||
+           codePoint == 0x2212 || codePoint == 0x3000;
+}
+
 void normalizeKeyPart(const char* input, char* output, size_t outputSize) {
     if (!output || outputSize == 0) return;
     output[0] = '\0';
@@ -152,17 +273,58 @@ void normalizeKeyPart(const char* input, char* output, size_t outputSize) {
 
     size_t out = 0;
     bool pendingSpace = false;
-    while (*input && out + 1 < outputSize) {
-        const unsigned char ch = static_cast<unsigned char>(*input++);
-        if (isspace(ch)) {
+    while (*input) {
+        uint32_t codePoint = 0;
+        const bool validUtf8 = readUtf8CodePoint(input, codePoint);
+        if (validUtf8 && isComparisonSeparator(codePoint)) {
             pendingSpace = out > 0;
             continue;
         }
-        if (pendingSpace && out + 1 < outputSize) output[out++] = ' ';
+
+        codePoint = validUtf8 ? lowerComparisonCodePoint(codePoint) : codePoint;
+        const size_t codePointSize = validUtf8 ? utf8CodePointSize(codePoint) : 1;
+        const size_t spaceSize = pendingSpace && out > 0 ? 1 : 0;
+        if (out + spaceSize + codePointSize >= outputSize) break;
+
+        if (spaceSize != 0) output[out++] = ' ';
         pendingSpace = false;
-        output[out++] = ch < 0x80 ? static_cast<char>(tolower(ch)) : static_cast<char>(ch);
+        if (validUtf8) {
+            appendUtf8CodePoint(codePoint, output, out);
+        } else {
+            output[out++] = static_cast<char>(codePoint);
+        }
     }
     output[out] = '\0';
+}
+
+bool isTrailingTechnicalId(const char* text) {
+    bool hasDigit = false;
+    for (const unsigned char* cursor = reinterpret_cast<const unsigned char*>(text);
+         cursor && *cursor; ++cursor) {
+        if (isdigit(*cursor)) {
+            hasDigit = true;
+        } else if (!isspace(*cursor) && !ispunct(*cursor)) {
+            return false;
+        }
+    }
+    return hasDigit;
+}
+
+void cleanTrackTitleForSearch(const char* input, char* output, size_t outputSize) {
+    if (!output || outputSize == 0) return;
+    strlcpy(output, input ? input : "", outputSize);
+
+    char* suffix = strrchr(output, ';');
+    if (suffix && isTrailingTechnicalId(suffix + 1)) *suffix = '\0';
+
+    char* clean = trim(output);
+    if (clean != output) memmove(output, clean, strlen(clean) + 1);
+}
+
+void normalizeTrackTitle(const char* input, char* output, size_t outputSize) {
+    char cleaned[256];
+    cleanTrackTitleForSearch(input, cleaned, sizeof(cleaned));
+    normalizeKeyPart(cleaned, output, outputSize);
 }
 
 bool splitCombinedTitle(const char* combined, char* artist, size_t artistSize,
@@ -188,7 +350,7 @@ void makeKey(const char* artist, const char* title, char* key, size_t keySize) {
     char normalizedArtist[128];
     char normalizedTitle[192];
     normalizeKeyPart(artist, normalizedArtist, sizeof(normalizedArtist));
-    normalizeKeyPart(title, normalizedTitle, sizeof(normalizedTitle));
+    normalizeTrackTitle(title, normalizedTitle, sizeof(normalizedTitle));
     snprintf(key, keySize, "%s\x1f%s", normalizedArtist, normalizedTitle);
 }
 
@@ -455,14 +617,19 @@ bool httpGetToPsram(const String& url, size_t limit, uint8_t*& data, size_t& siz
             } else {
                 const int contentLength = http.getSize();
                 if (contentLength > 0 && static_cast<size_t>(contentLength) > limit) {
-                    log_w("##[COVER]# response too large: %d bytes", contentLength);
+                    log_w("##[COVER]# response too large: %d bytes (limit=%u)",
+                          contentLength, static_cast<unsigned>(limit));
                     http.end();
                     return false;
                 }
 
-                PsramBufferStream sink(limit);
+                const size_t bufferCapacity = contentLength > 0
+                    ? static_cast<size_t>(contentLength)
+                    : limit;
+                PsramBufferStream sink(bufferCapacity);
                 if (!sink.valid()) {
-                    log_w("##[COVER]# PSRAM allocation failed (%u bytes)", static_cast<unsigned>(limit));
+                    log_w("##[COVER]# PSRAM allocation failed (%u bytes)",
+                          static_cast<unsigned>(bufferCapacity));
                     http.end();
                     return false;
                 }
@@ -602,13 +769,53 @@ bool extractLastFmAlbum(const uint8_t* jsonData, size_t jsonSize,
     return mbid[0] != '\0' || imageUrl[0] != '\0';
 }
 
+bool nextArtistPart(const char*& cursor, char* output, size_t outputSize) {
+    if (!cursor || !output || outputSize == 0) return false;
+
+    while (*cursor == ';' || isspace(static_cast<unsigned char>(*cursor))) ++cursor;
+    if (*cursor == '\0') return false;
+
+    const char* end = strchr(cursor, ';');
+    const size_t rawLength = end ? static_cast<size_t>(end - cursor) : strlen(cursor);
+    const size_t copyLength = rawLength < outputSize - 1 ? rawLength : outputSize - 1;
+    memcpy(output, cursor, copyLength);
+    output[copyLength] = '\0';
+    cursor = end ? end + 1 : cursor + rawLength;
+
+    char* clean = trim(output);
+    if (clean != output) memmove(output, clean, strlen(clean) + 1);
+    return output[0] != '\0';
+}
+
 bool artistMatches(const char* expected, const char* candidate) {
+    if (!expected || !candidate) return false;
+
     char normalizedExpected[128];
     char normalizedCandidate[128];
     normalizeKeyPart(expected, normalizedExpected, sizeof(normalizedExpected));
     normalizeKeyPart(candidate, normalizedCandidate, sizeof(normalizedCandidate));
-    return normalizedExpected[0] != '\0' &&
-           strcmp(normalizedExpected, normalizedCandidate) == 0;
+    if (normalizedExpected[0] != '\0' &&
+        strcmp(normalizedExpected, normalizedCandidate) == 0) {
+        return true;
+    }
+
+    const char* expectedCursor = expected;
+    char expectedPart[128];
+    while (nextArtistPart(expectedCursor, expectedPart, sizeof(expectedPart))) {
+        char normalizedExpectedPart[128];
+        normalizeKeyPart(expectedPart, normalizedExpectedPart, sizeof(normalizedExpectedPart));
+        if (normalizedExpectedPart[0] == '\0') continue;
+
+        const char* candidateCursor = candidate;
+        char candidatePart[128];
+        while (nextArtistPart(candidateCursor, candidatePart, sizeof(candidatePart))) {
+            char normalizedCandidatePart[128];
+            normalizeKeyPart(candidatePart, normalizedCandidatePart,
+                             sizeof(normalizedCandidatePart));
+            if (strcmp(normalizedExpectedPart, normalizedCandidatePart) == 0) return true;
+        }
+    }
+    return false;
 }
 
 bool titleMatchesSafely(const char* expected, const char* candidate) {
@@ -639,8 +846,9 @@ bool extractLastFmTrackMatch(const uint8_t* jsonData, size_t jsonSize,
     cJSON* tracks = cJSON_IsObject(matches)
                         ? cJSON_GetObjectItemCaseSensitive(matches, "track")
                         : nullptr;
+    const bool hasRequiredArtist = requiredArtist && requiredArtist[0] != '\0';
     char normalizedRequiredTitle[192];
-    normalizeKeyPart(requiredTitle, normalizedRequiredTitle, sizeof(normalizedRequiredTitle));
+    normalizeTrackTitle(requiredTitle, normalizedRequiredTitle, sizeof(normalizedRequiredTitle));
     char fallbackArtist[128] = {0};
     char fallbackTitle[192] = {0};
 
@@ -658,20 +866,22 @@ bool extractLastFmTrackMatch(const uint8_t* jsonData, size_t jsonSize,
             continue;
         }
 
-        if (requiredArtist && artistMatches(requiredArtist, matchArtist->valuestring)) {
+        char normalizedMatchTitle[192];
+        normalizeTrackTitle(matchTitle->valuestring, normalizedMatchTitle,
+                            sizeof(normalizedMatchTitle));
+        const bool titleMatches = titleMatchesSafely(normalizedRequiredTitle,
+                                                     normalizedMatchTitle);
+
+        if (hasRequiredArtist && titleMatches &&
+            artistMatches(requiredArtist, matchArtist->valuestring)) {
             strlcpy(artist, matchArtist->valuestring, artistSize);
             strlcpy(title, matchTitle->valuestring, titleSize);
             break;
         }
 
-        if (fallbackArtist[0] == '\0') {
-            char normalizedMatchTitle[192];
-            normalizeKeyPart(matchTitle->valuestring, normalizedMatchTitle,
-                             sizeof(normalizedMatchTitle));
-            if (titleMatchesSafely(normalizedRequiredTitle, normalizedMatchTitle)) {
-                strlcpy(fallbackArtist, matchArtist->valuestring, sizeof(fallbackArtist));
-                strlcpy(fallbackTitle, matchTitle->valuestring, sizeof(fallbackTitle));
-            }
+        if (!hasRequiredArtist && fallbackArtist[0] == '\0' && titleMatches) {
+            strlcpy(fallbackArtist, matchArtist->valuestring, sizeof(fallbackArtist));
+            strlcpy(fallbackTitle, matchTitle->valuestring, sizeof(fallbackTitle));
         }
     }
     if (artist[0] == '\0' && fallbackArtist[0] != '\0') {
@@ -692,9 +902,7 @@ bool findLastFmTrackByTitle(const char* rawTitle, const char* requiredArtist,
     if (bluetoothTitleMode) {
         makeBluetoothTrackSearch(rawTitle, searchTitle, sizeof(searchTitle));
     } else {
-        strlcpy(searchTitle, rawTitle ? rawTitle : "", sizeof(searchTitle));
-        char* clean = trim(searchTitle);
-        if (clean != searchTitle) memmove(searchTitle, clean, strlen(clean) + 1);
+        cleanTrackTitleForSearch(rawTitle, searchTitle, sizeof(searchTitle));
     }
     if (searchTitle[0] == '\0') return false;
 

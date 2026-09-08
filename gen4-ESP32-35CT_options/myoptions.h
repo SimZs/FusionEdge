@@ -13,6 +13,10 @@
 // #define USE_LASTFM_COVER
 // #define LASTFM_API_KEY "your_lastfm_api_key"
 
+// Full-screen album cover and track information for the "While playing" screensaver.
+// Requires a 480x320 display and PSRAM. Enable USE_LASTFM_COVER for downloaded covers.
+#define USE_COVER_SCREENSAVER
+
 // Animated cassette replaces the clock during the non-blank "While playing" screensaver.
 // #define USE_CASSETTE_SCREENSAVER
 // #define CASSETTE_FRAME_MS 100UL // Reel animation interval; lower values increase display load.
@@ -37,7 +41,7 @@ Supported languages: HU, PL, NL, GR, DE (UA Local/namedays/namedays_UA.h is not 
 #define LGFX_LCD_SPI_WRITE_FREQ 20000000
 #define LGFX_LCD_SPI_READ_FREQ 16000000
 #define LGFX_PANEL_INVERT false
-#define LGFX_ROTATION 1
+#define LGFX_ROTATION 0 // Physical panel offset; landscape rotation is applied by the display driver.
 
 #define TFT_MISO -1
 #define TFT_MOSI 13
@@ -47,6 +51,8 @@ Supported languages: HU, PL, NL, GR, DE (UA Local/namedays/namedays_UA.h is not 
 #define TFT_RST 7
 
 #define BRIGHTNESS_PIN 4
+// #define BRIGHTNESS_PWM_FREQUENCY 4500
+// #define WIFI_TX_POWER WIFI_POWER_11dBm
 
 /* Integrated FocalTech capacitive touch controller. */
 #define TS_MODEL TS_MODEL_FT6X36

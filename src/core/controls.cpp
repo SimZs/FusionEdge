@@ -69,11 +69,12 @@ static inline bool useIndependentEncoders() {
 #    define DUMMYDISPLAY
 #endif
 
-#define ISPUSHBUTTONS BTN_LEFT != 255 || BTN_CENTER != 255 || BTN_RIGHT != 255 || ENC_BTNB != 255 || BTN_UP != 255 || BTN_DOWN != 255 || ENC2_BTNB != 255 || BTN_MODE != 255
+#define ISPUSHBUTTONS BTN_LEFT != 255 || BTN_CENTER != 255 || BTN_RIGHT != 255 || ENC_BTNB != 255 || BTN_UP != 255 || BTN_DOWN != 255 || ENC2_BTNB != 255 || BTN_MODE != 255 || BTN_RGB != 255
 #if ISPUSHBUTTONS
 #    include "../OneButton/OneButton.h"
 OneButton         button[]{{BTN_LEFT, true, BTN_INTERNALPULLUP}, {BTN_CENTER, true, BTN_INTERNALPULLUP}, {BTN_RIGHT, true, BTN_INTERNALPULLUP},  {ENC_BTNB, true, ENC_INTERNALPULLUP},
-                           {BTN_UP, true, BTN_INTERNALPULLUP},   {BTN_DOWN, true, BTN_INTERNALPULLUP},   {ENC2_BTNB, true, ENC2_INTERNALPULLUP}, {BTN_MODE, true, BTN_INTERNALPULLUP}};
+                           {BTN_UP, true, BTN_INTERNALPULLUP},   {BTN_DOWN, true, BTN_INTERNALPULLUP},   {ENC2_BTNB, true, ENC2_INTERNALPULLUP}, {BTN_MODE, true, BTN_INTERNALPULLUP},
+                           {BTN_RGB, true, BTN_INTERNALPULLUP}};
 constexpr uint8_t nrOfButtons = sizeof(button) / sizeof(button[0]);
 #endif
 
@@ -162,7 +163,7 @@ void initControls() {
 #if ISPUSHBUTTONS
     for (int i = 0; i < nrOfButtons; i++) {
         if ((i == 0 && BTN_LEFT == 255) || (i == 1 && BTN_CENTER == 255) || (i == 2 && BTN_RIGHT == 255) || (i == 3 && ENC_BTNB == 255) || (i == 4 && BTN_UP == 255) || (i == 5 && BTN_DOWN == 255) ||
-            (i == 6 && ENC2_BTNB == 255) || (i == 7 && BTN_MODE == 255))
+            (i == 6 && ENC2_BTNB == 255) || (i == 7 && BTN_MODE == 255) || (i == 8 && BTN_RGB == 255))
             continue;
         button[i].attachClick([](void* p) { onBtnClick((int)p); }, (void*)i);
         button[i].attachDoubleClick([](void* p) { onBtnDoubleClick((int)p); }, (void*)i);
@@ -199,7 +200,7 @@ void loopControls() {
 #if ISPUSHBUTTONS
     for (unsigned i = 0; i < nrOfButtons; i++) {
         if ((i == 0 && BTN_LEFT == 255) || (i == 1 && BTN_CENTER == 255) || (i == 2 && BTN_RIGHT == 255) || (i == 3 && ENC_BTNB == 255) || (i == 4 && BTN_UP == 255) || (i == 5 && BTN_DOWN == 255) ||
-            (i == 6 && ENC2_BTNB == 255))
+            (i == 6 && ENC2_BTNB == 255) || (i == 7 && BTN_MODE == 255) || (i == 8 && BTN_RGB == 255))
             continue;
         button[i].tick();
         if (lpId >= 0) {
@@ -598,10 +599,6 @@ void onBtnLongPressStart(int id) {
             }
             break;
         }
-        case EVT_BTNMODE: {
-            display.putRequest(NEWMODE, SLEEPING);
-            break;
-        }
         default: break;
     }
 }
@@ -615,7 +612,6 @@ void onBtnLongPressStop(int id) {
             lpId = -1;
             break;
         }
-        case EVT_BTNMODE:
         default: break;
     }
 }
@@ -694,7 +690,7 @@ void onBtnClick(int id) {
     controlEvt_e btnid = static_cast<controlEvt_e>(id);
     if (wakeDisplayFromScreensaver()) return;
     pm.on_btn_click(btnid);
-    if (network.status != CONNECTED && network.status != SDREADY && (controlEvt_e)id != EVT_BTNMODE && !passBnCenter) return;
+    if (network.status != CONNECTED && network.status != SDREADY && btnid != EVT_BTNMODE && btnid != EVT_BTNRGB && !passBnCenter) return;
     registerUserActivity();
     switch (btnid) {
         case EVT_BTNLEFT: {
@@ -757,12 +753,19 @@ void onBtnClick(int id) {
             }
             break;
         }
-#if defined(USE_SD) || defined(USE_DLNA)
+#if defined(USE_SD) || defined(USE_DLNA) || defined(USE_BLUETOOTH)
         case EVT_BTNMODE: {
             config.toggleMode();
             break;
         }
 #endif
+        case EVT_BTNRGB: {
+            const uint8_t enabled = config.store.lsEnabled ? 0 : 1;
+            config.saveValue(&config.store.lsEnabled, enabled);
+            display.putRequest(INVALIDATETHEMEWIDGETS);
+            log_i("##[BTN]# RGB LED strip %s", enabled ? "enabled" : "disabled");
+            break;
+        }
         default: break;
     }
 }
@@ -796,6 +799,13 @@ void onBtnDoubleClick(int id) {
             if (display.mode() != PLAYER) return;
             if (network.status != CONNECTED && network.status != SDREADY) return;
             player.next();
+            break;
+        }
+        case EVT_BTNRGB: {
+            static const char* const effectNames[] = {"VU", "Rainbow Flow", "Sparkle", "Meter VU"};
+            const uint8_t nextEffect = (config.store.lsModel + 1) % 4;
+            config.saveValue(&config.store.lsModel, nextEffect);
+            log_i("##[BTN]# RGB effect: %s (%u)", effectNames[nextEffect], nextEffect);
             break;
         }
         default: break;

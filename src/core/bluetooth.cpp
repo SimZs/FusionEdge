@@ -168,6 +168,23 @@ void BluetoothPlayer::loop() {
         if (_lineLen < sizeof(_lineBuf) - 1) { _lineBuf[_lineLen++] = c; }
     }
 
+    // WEB/SD playback is stopped through the player queue. Start the BT
+    // bridge only after that stop has really completed, otherwise both audio
+    // producers can touch the same I2S TX channel during a mode change.
+    if (_bridgeStartPending) {
+        if (config.getMode() != PM_BLUETOOTH) {
+            _bridgeStartPending = false;
+        } else if (!player.isRunning() && player.status() == STOPPED &&
+                   player.readyForWebStation()) {
+            _bridgeStartPending = false;
+            if (!startBridgeNow()) {
+                log_e("##[BT]# deferred bridge start failed");
+            } else {
+                log_i("##[BT]# deferred bridge started");
+            }
+        }
+    }
+
     // Ha érkezett új cím/előadó, küldjük a display-re.
     // Feltétel: connected legyen (BT_PA vagy BT_STOP is jó — kézi trackváltásnál
     // a metaadat BT_STOP állapotban érkezik, BT_PA csak utána jön)
@@ -410,6 +427,20 @@ void BluetoothPlayer::deinitI2SRx() {
 // =====================================================================
 
 bool BluetoothPlayer::startBridge() {
+    if (_bridgeTaskHandle) return true;
+    if (!_rxHandle) return false;
+
+    if (player.isRunning() || player.status() == PLAYING ||
+        !player.readyForWebStation()) {
+        _bridgeStartPending = true;
+        log_i("##[BT]# bridge start deferred until decoder stops");
+        return true;
+    }
+
+    return startBridgeNow();
+}
+
+bool BluetoothPlayer::startBridgeNow() {
     if (_bridgeTaskHandle || !_rxHandle) return false;
 
     // Force the QCC module to the same I2S sample rate as the ESP bridge.
@@ -441,12 +472,23 @@ bool BluetoothPlayer::startBridge() {
 
     if (i2s_channel_enable(_rxHandle) != ESP_OK) return false;
     _bridgeStopRequest = false;
-    // Core 0 → elkülönül a display tasktól (core 1), prioritás 2 (alacsony)
-    xTaskCreatePinnedToCore(bridgeTaskWrapper, "bt_i2s_bridge", 4096, this, 3, &_bridgeTaskHandle, 0);
+    // Core 0 keeps the bridge separate from the regular Audio task.
+    BaseType_t taskCreated = xTaskCreatePinnedToCore(
+        bridgeTaskWrapper, "bt_i2s_bridge", 4096, this, 3,
+        &_bridgeTaskHandle, 0);
+    if (taskCreated != pdPASS) {
+        _bridgeTaskHandle = nullptr;
+        i2s_channel_disable(_rxHandle);
+        player.setOutputSampleRate(Audio::SR_ORIGIN);
+        return false;
+    }
     return true;
 }
 
 void BluetoothPlayer::stopBridge() {
+    _bridgeStartPending = false;
+    _vuLeft = 0;
+    _vuRight = 0;
     if (!_bridgeTaskHandle) return;
     _bridgeStopRequest = true;
     // task deletes itself and clears the handle on the way out
@@ -522,6 +564,23 @@ void BluetoothPlayer::bridgeTask() {
                 lastErrorLogMs = millis();
             }
 
+            uint8_t peakLeft = 0;
+            uint8_t peakRight = 0;
+            for (size_t i = 0; i < frames; ++i) {
+                const int32_t leftSample = tx32Buf[i * 2] >> 16;
+                const int32_t rightSample = tx32Buf[i * 2 + 1] >> 16;
+                uint32_t left = static_cast<uint32_t>(leftSample < 0 ? -leftSample : leftSample);
+                uint32_t right = static_cast<uint32_t>(rightSample < 0 ? -rightSample : rightSample);
+                left = left > 32767U ? 255U : (left >> 7);
+                right = right > 32767U ? 255U : (right >> 7);
+                if (left > peakLeft) peakLeft = static_cast<uint8_t>(left);
+                if (right > peakRight) peakRight = static_cast<uint8_t>(right);
+            }
+            _vuLeft = peakLeft >= _vuLeft ? peakLeft :
+                      (_vuLeft > 4 ? static_cast<uint8_t>(_vuLeft - 4) : peakLeft);
+            _vuRight = peakRight >= _vuRight ? peakRight :
+                       (_vuRight > 4 ? static_cast<uint8_t>(_vuRight - 4) : peakRight);
+
             spectrumAnalyzer.pushSamples(spectrumBuf, (int16_t)frames);
         } else if (err != ESP_OK && err != ESP_ERR_TIMEOUT && millis() - lastErrorLogMs >= 2000) {
             log_w("##[BT]# I2S RX read failed: %d", err);
@@ -529,6 +588,8 @@ void BluetoothPlayer::bridgeTask() {
         }
     }
 
+    _vuLeft = 0;
+    _vuRight = 0;
     _bridgeTaskHandle = nullptr;
     vTaskDelete(nullptr);
 }

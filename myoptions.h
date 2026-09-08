@@ -21,17 +21,21 @@
 // #define USE_LASTFM_COVER
 // #define LASTFM_API_KEY "your_lastfm_api_key"
 
+// Full-screen album cover and track information for the "While playing" screensaver.
+// Requires a 480x320 display and PSRAM. Enable USE_LASTFM_COVER for downloaded covers.
+#define USE_COVER_SCREENSAVER
+
 // Animated cassette replaces the clock during the non-blank "While playing" screensaver.
-#define USE_CASSETTE_SCREENSAVER
+// #define USE_CASSETTE_SCREENSAVER
 // #define CASSETTE_FRAME_MS 100UL // Reel animation interval; lower values increase display load.
 // #define CASSETTE_PNG_PATH "/images/screensaver/retro_audio_cassette.png"      // Silver/green cassette.
 // #define CASSETTE_PNG_PATH "/images/screensaver/retro_audio_cassette_blue.png" // Blue/pink cassette.
 // #define CASSETTE_PNG_PATH "/images/screensaver/retro_audio_cassette_red.png"  // Red/cream cassette.
 
-// --- DLNA / Synology ---
+// --- DLNA ---
 //#define USE_DLNA
-//#define dlnaHost "192.168.180.122"
-//#define dlnaIDX  21
+//#define dlnaHost "192.168.180.122" // your DLNA server IP address
+//#define dlnaIDX  21 //(Music folder index: Synology = 21, MiniDLNA = 1, etc.)
 
 #define LEDSTRIP_PIN        48
 
@@ -64,6 +68,8 @@
 //#define TFT_MISO  13
 
 #define BRIGHTNESS_PIN 14
+// #define BRIGHTNESS_PWM_FREQUENCY 4500 // Override the 4.5 kHz backlight PWM default.
+// #define WIFI_TX_POWER WIFI_POWER_11dBm // Lower this if WiFi RF noise reaches the audio path.
 /*****************************************/
 // #define NEXTION_RX      15
 // #define NEXTION_TX     16
@@ -97,6 +103,10 @@
 #define ENC_BTNL 6 // S1
 #define ENC_BTNB 5 // KEY
 #define ENC_INTERNALPULLUP		true
+
+/* OPTIONAL PUSH BUTTONS (connect the selected GPIO to GND) */
+// #define BTN_MODE 255 // Short press: WEB -> DLNA -> SD -> BT
+// #define BTN_RGB  255 // Click: LED strip on/off; double-click: next effect
 
 /* ENCODER 2 */
 /*#define ENC2_BTNR 7 // S2
@@ -148,4 +158,3 @@
 //#define DOWN_LEVEL           2      /* lowest level brightness (from 0 to 255) */
 //#define DOWN_INTERVAL        60     /* interval for BacklightDown in sec (60 sec = 1 min) */
 /* ***************************************** */
-

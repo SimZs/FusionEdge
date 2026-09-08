@@ -82,13 +82,9 @@ bool MyNetwork::wifiBegin(bool silent) {
     delay(1000); 
     WiFi.mode(WIFI_STA);
     delay(500);
-    // FusionEdge: explicit maximum TX power. Some environments (band-steering
-    // APs, busy 2.4GHz cells, e.g. office WiFi where 2.4G/5G aren't separated
-    // and the ESP32 can only see 2.4GHz) benefit from this even though it
-    // doesn't change the device's receive sensitivity - it can reduce
-    // disconnects caused by the AP losing the association due to weak
-    // uplink signal from the ESP32 side.
-    WiFi.setTxPower(WIFI_POWER_19_5dBm);
+    // Keep RF noise and supply-current peaks below the framework maximum.
+    // WIFI_TX_POWER can be overridden in myoptions.h for the local hardware.
+    WiFi.setTxPower(WIFI_TX_POWER);
     uint8_t ls = (config.store.lastSSID == 0 || config.store.lastSSID > config.ssidsCount) ? 0 : config.store.lastSSID - 1;
     uint8_t startedls = ls;
     uint8_t errcnt = 0;
@@ -121,7 +117,7 @@ bool MyNetwork::wifiBegin(bool silent) {
             delay(500);
             WiFi.mode(WIFI_STA);
             delay(500);
-            WiFi.setTxPower(WIFI_POWER_19_5dBm); // FusionEdge: re-apply, WIFI_OFF may reset it
+            WiFi.setTxPower(WIFI_TX_POWER); // WIFI_OFF may reset the configured limit
         }
         WiFi.begin(config.ssids[ls].ssid, config.ssids[ls].password);
         while (WiFi.status() != WL_CONNECTED) {

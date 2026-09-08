@@ -20,5 +20,6 @@
 #include "volumeWidget.h"
 #include "bufferWidget.h"
 #include "cassetteWidget.h"
+#include "coverScreensaverWidget.h"
 #include "spectrumWidget.h"
 #include "wifiWidget.h"
