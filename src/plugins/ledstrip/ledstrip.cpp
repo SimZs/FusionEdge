@@ -984,6 +984,14 @@ void LedStripPlugin::on_stop_play() {
   showStrip();
 }
 
+void LedStripPlugin::on_sleep() {
+  if (!ledStripPinAvailable()) return;
+  g_flashUntil = 0;
+  strip.clear();
+  strip.show();
+  log_i("##[LEDSTRIP]# cleared before deep sleep");
+}
+
 void LedStripPlugin::on_station_change() {
   if (!ledStripPinAvailable()) return;
   flashNow(0, 220, 180, 180);

@@ -429,9 +429,9 @@ void irLoop() {
         // if (!irResults.repeat /* && irResults.command!=0*/) { irVolRepeat = 0; }
         if (irResults.repeat) {
             switch (irVolRepeat) {
-                case 1: controlsEvent(display.mode() == STATIONS ? false : true); break;
+                case 1: controlsEvent(true); break;
 
-                case 2: controlsEvent(display.mode() == STATIONS ? true : false); break;
+                case 2: controlsEvent(false); break;
             }
             irrecv.resume(); // ← add (MB)
             return;          // ← add (MB)
@@ -478,7 +478,7 @@ void irLoop() {
                         }
                         case IR_PREV: {
                             if (display.mode() == STATIONS) {
-                                controlsEvent(true);
+                                controlsEvent(false);
                                 break;
                             } else {
                                 if (display.mode() == PLAYER && !irAllowPlayerStationSwitch()) { break; }
@@ -488,7 +488,7 @@ void irLoop() {
                         }
                         case IR_NEXT: {
                             if (display.mode() == STATIONS) {
-                                controlsEvent(false);
+                                controlsEvent(true);
                                 break;
                             } else {
                                 if (display.mode() == PLAYER && !irAllowPlayerStationSwitch()) { break; }
@@ -506,12 +506,12 @@ void irLoop() {
                             break;
                         }
                         case IR_VOLUME_DOWN: {
-                            controlsEvent(display.mode() == STATIONS ? true : false);
+                            controlsEvent(false);
                             irVolRepeat = 2;
                             break;
                         }
                         case IR_VOLUME_UP: {
-                            controlsEvent(display.mode() == STATIONS ? false : true);
+                            controlsEvent(true);
                             irVolRepeat = 1;
                             break;
                         }

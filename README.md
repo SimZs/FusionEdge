@@ -13,6 +13,23 @@ The project grew from the LovyanGFX/LittleFS-based [VTomRadio](https://github.co
 FusionEdge is now feature-complete. Development focuses on confirmed bug fixes,
 hardware compatibility and selected community contributions.
 
+### Version 1.1.1
+
+- Prevents playlist touch scrolling from changing the volume when the gesture
+  begins on the player screen
+- Refines the full-screen cover layout, including centered clock/weather
+  content, safe nameday wrapping and artifact-free transparent text rendering
+- Uses attributed and HTTP-cached Last.fm metadata while retrieving artwork
+  exclusively from Cover Art Archive via MusicBrainz release identifiers
+- Corrects IR previous/next and volume-button navigation direction in the
+  channel list, including held-button repeats
+- Clears the RGB LED strip before every deep-sleep path so the final animation
+  frame cannot remain illuminated
+
+The artifact-free cover-screensaver text rendering in this release was
+contributed by Volodimyr Zagranichniy. Thank you for the continued testing and
+careful improvements.
+
 ### Version 1.0.10
 
 - Adds an optional full-screen album-cover screensaver with current track,
@@ -179,7 +196,7 @@ append entries to the playback list.
 Directory browsing runs through a background worker instead of the web-server
 callback. This keeps SOAP requests away from the AsyncTCP task and makes larger
 or slower media-server libraries considerably more reliable. The WebUI and
-firmware endpoints are version-dependent, so upload the matching v1.0.10 LittleFS data
+firmware endpoints are version-dependent, so upload the matching v1.1.1 LittleFS data
 along with the firmware when upgrading from an earlier release.
 
 ## Last.fm album art
@@ -194,13 +211,16 @@ following to `myoptions.h`:
 ```
 
 The lookup runs in a low-priority background task and only starts when metadata
-contains both an artist and a title in `Artist - Title` form. FusionEdge first
-uses the largest album image returned by Last.fm `track.getInfo`. If Last.fm
-does not provide a usable image, it uses the album MusicBrainz ID or searches
-MusicBrainz for a matching release group before checking Cover Art Archive.
-Images are kept in PSRAM and are not written to LittleFS. While a cover is
-unavailable, downloading or invalid, the normal station or source icon remains
-visible.
+contains both an artist and a title in `Artist - Title` form. FusionEdge uses
+Last.fm for metadata matching and an album MusicBrainz ID when available. It
+otherwise searches MusicBrainz for a matching release group, then retrieves the
+image from Cover Art Archive. Images are kept in PSRAM and are not written to
+LittleFS. While a cover is unavailable, downloading or invalid, the normal
+station or source icon remains visible.
+
+Last.fm metadata responses use a small PSRAM cache which follows the server's
+`Cache-Control` and `Expires` instructions. Responses marked `no-store` or
+`no-cache` are not reused.
 
 Bluetooth metadata receives an additional fallback for video services. If the
 QCC artist field contains a channel name and the exact lookup fails, FusionEdge
@@ -218,10 +238,11 @@ contiguous internal RAM required by HTTPS audio streams on the ESP32-S3. Only
 the Last.fm API key is sent; do not add a Last.fm shared secret to the firmware.
 
 This integration uses metadata from Last.fm and MusicBrainz, and cover art from
-the [Cover Art Archive](https://musicbrainz.org/doc/Cover_Art_Archive). Review the
-[Last.fm API terms](https://www.last.fm/api/tos), retain the required Last.fm
-credit in redistributed builds, and respect the rights of artists and labels
-when using Cover Art Archive images.
+the [Cover Art Archive](https://musicbrainz.org/doc/Cover_Art_Archive). The WebUI
+includes a visible link crediting Last.fm. Review the
+[Last.fm API terms](https://www.last.fm/api/tos), retain that credit in
+redistributed builds, and respect the rights of artists and labels when using
+Cover Art Archive images.
 
 ## Weather units
 

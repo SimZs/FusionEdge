@@ -64,6 +64,12 @@ class Plugin {
     virtual void on_stop_play() __attribute__((weak)) {}
 
     /**
+     * Triggered immediately before entering deep sleep.
+     * Location: Config::doSleep()/doSleepW(), FusionEdge/src/core/config.cpp
+     */
+    virtual void on_sleep() __attribute__((weak)) {}
+
+    /**
      * Triggered when the current track changes.
      * Location: Display::_title(), FusionEdge/src/core/display.cpp
      */
@@ -144,6 +150,7 @@ class pluginsManager {
     inline void on_connect() { call_event(&Plugin::on_connect); }
     inline void on_start_play() { call_event(&Plugin::on_start_play); }
     inline void on_stop_play() { call_event(&Plugin::on_stop_play); }
+    inline void on_sleep() { call_event(&Plugin::on_sleep); }
     inline void on_track_change() { call_event(&Plugin::on_track_change); }
     inline void on_station_change() { call_event(&Plugin::on_station_change); }
     inline void on_display_queue(requestParams_t& request, bool& result) { call_event(&Plugin::on_display_queue, request, result); }

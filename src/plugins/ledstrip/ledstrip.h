@@ -10,6 +10,7 @@ class LedStripPlugin : public Plugin {
     void on_connect() override;
     void on_start_play() override;
     void on_stop_play() override;
+    void on_sleep() override;
     void on_station_change() override;
     void on_track_change() override;
     void on_ticker() override;

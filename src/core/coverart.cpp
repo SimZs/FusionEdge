@@ -8,6 +8,7 @@
 #include <ctype.h>
 #include <esp_heap_caps.h>
 #include <freertos/idf_additions.h>
+#include <time.h>
 
 #include "display.h"
 #ifdef USE_DLNA
@@ -25,8 +26,23 @@ constexpr uint32_t COVER_CONNECT_TIMEOUT_MS = 6000;
 constexpr uint32_t COVER_READ_TIMEOUT_MS = 8000;
 constexpr char HTTP_USER_AGENT[] =
     "FusionEdge/" FW_VERSION " (https://github.com/SimZs/FusionEdge)";
+constexpr size_t LASTFM_CACHE_ENTRY_LIMIT = 4;
+constexpr size_t LASTFM_CACHE_BYTE_LIMIT = 256 * 1024;
+constexpr uint32_t CACHE_MAX_AGE_LIMIT_SECONDS = 7 * 24 * 60 * 60;
 
 uint32_t lastMusicBrainzRequestMs = 0;
+
+struct LastFmCacheEntry {
+    char* url = nullptr;
+    uint8_t* data = nullptr;
+    size_t size = 0;
+    uint32_t expiresAt = 0;
+    uint32_t lastUsed = 0;
+};
+
+LastFmCacheEntry lastFmCache[LASTFM_CACHE_ENTRY_LIMIT];
+size_t lastFmCacheBytes = 0;
+uint32_t lastFmCacheUseSerial = 0;
 
 struct MbidCandidates {
     char ids[MUSICBRAINZ_CANDIDATE_LIMIT][40]{};
@@ -563,11 +579,166 @@ String requestHost(const String& url) {
     return url.substring(hostStart, hostEnd);
 }
 
+bool isLastFmApiUrl(const String& url) {
+    return url.startsWith("http://ws.audioscrobbler.com/2.0/");
+}
+
+void clearLastFmCacheEntry(LastFmCacheEntry& entry) {
+    if (entry.data) {
+        lastFmCacheBytes = entry.size <= lastFmCacheBytes
+            ? lastFmCacheBytes - entry.size
+            : 0;
+        free(entry.data);
+    }
+    if (entry.url) free(entry.url);
+    entry.url = nullptr;
+    entry.data = nullptr;
+    entry.size = 0;
+    entry.expiresAt = 0;
+    entry.lastUsed = 0;
+}
+
+LastFmCacheEntry* oldestLastFmCacheEntry() {
+    LastFmCacheEntry* oldest = nullptr;
+    for (auto& entry : lastFmCache) {
+        if (!entry.data) continue;
+        if (!oldest || entry.lastUsed < oldest->lastUsed) oldest = &entry;
+    }
+    return oldest;
+}
+
+bool copyLastFmCachedResponse(const String& url, uint8_t*& data, size_t& size) {
+    const uint32_t now = millis();
+    for (auto& entry : lastFmCache) {
+        if (!entry.url || strcmp(entry.url, url.c_str()) != 0) continue;
+        if (static_cast<int32_t>(now - entry.expiresAt) >= 0) {
+            clearLastFmCacheEntry(entry);
+            return false;
+        }
+
+        auto* copy = static_cast<uint8_t*>(ps_malloc(entry.size + 1));
+        if (!copy) return false;
+        memcpy(copy, entry.data, entry.size);
+        copy[entry.size] = 0;
+        data = copy;
+        size = entry.size;
+        if (++lastFmCacheUseSerial == 0) ++lastFmCacheUseSerial;
+        entry.lastUsed = lastFmCacheUseSerial;
+        log_d("##[COVERCACHE]# Last.fm metadata hit (%u bytes)",
+              static_cast<unsigned>(size));
+        return true;
+    }
+    return false;
+}
+
+void storeLastFmCachedResponse(const String& url, const uint8_t* data, size_t size,
+                               uint32_t maxAgeSeconds) {
+    if (!data || size == 0 || size > LASTFM_CACHE_BYTE_LIMIT || maxAgeSeconds == 0) return;
+
+    const size_t urlSize = url.length() + 1;
+    auto* cachedUrl = static_cast<char*>(ps_malloc(urlSize));
+    auto* cachedData = static_cast<uint8_t*>(ps_malloc(size + 1));
+    if (!cachedUrl || !cachedData) {
+        if (cachedUrl) free(cachedUrl);
+        if (cachedData) free(cachedData);
+        return;
+    }
+    memcpy(cachedUrl, url.c_str(), urlSize);
+    memcpy(cachedData, data, size);
+    cachedData[size] = 0;
+
+    LastFmCacheEntry* slot = nullptr;
+    for (auto& entry : lastFmCache) {
+        if (entry.url && strcmp(entry.url, url.c_str()) == 0) {
+            clearLastFmCacheEntry(entry);
+            slot = &entry;
+            break;
+        }
+        if (!slot && !entry.data) slot = &entry;
+    }
+    if (!slot) {
+        slot = oldestLastFmCacheEntry();
+        if (slot) clearLastFmCacheEntry(*slot);
+    }
+    while (lastFmCacheBytes + size > LASTFM_CACHE_BYTE_LIMIT) {
+        LastFmCacheEntry* oldest = oldestLastFmCacheEntry();
+        if (!oldest) break;
+        clearLastFmCacheEntry(*oldest);
+    }
+    if (!slot) {
+        for (auto& entry : lastFmCache) {
+            if (!entry.data) {
+                slot = &entry;
+                break;
+            }
+        }
+    }
+    if (!slot || lastFmCacheBytes + size > LASTFM_CACHE_BYTE_LIMIT) {
+        free(cachedUrl);
+        free(cachedData);
+        return;
+    }
+
+    maxAgeSeconds = min<uint32_t>(maxAgeSeconds, CACHE_MAX_AGE_LIMIT_SECONDS);
+    if (++lastFmCacheUseSerial == 0) ++lastFmCacheUseSerial;
+    slot->url = cachedUrl;
+    slot->data = cachedData;
+    slot->size = size;
+    slot->expiresAt = millis() + maxAgeSeconds * 1000UL;
+    slot->lastUsed = lastFmCacheUseSerial;
+    lastFmCacheBytes += size;
+    log_d("##[COVERCACHE]# Last.fm metadata stored (%u bytes, max-age=%lu)",
+          static_cast<unsigned>(size), static_cast<unsigned long>(maxAgeSeconds));
+}
+
+bool parseHttpDate(const String& value, time_t& result) {
+    if (value.length() == 0) return false;
+    struct tm parsed{};
+    parsed.tm_isdst = -1;
+    if (!strptime(value.c_str(), "%a, %d %b %Y %H:%M:%S", &parsed)) return false;
+    result = mktime(&parsed);
+    return result != static_cast<time_t>(-1);
+}
+
+uint32_t responseFreshnessSeconds(const String& cacheControl,
+                                  const String& date, const String& expires) {
+    String directives = cacheControl;
+    directives.toLowerCase();
+    if (directives.indexOf("no-store") >= 0 || directives.indexOf("no-cache") >= 0) {
+        return 0;
+    }
+
+    const int maxAgeAt = directives.indexOf("max-age=");
+    if (maxAgeAt >= 0) {
+        const char* cursor = directives.c_str() + maxAgeAt + 8;
+        uint32_t seconds = 0;
+        while (*cursor >= '0' && *cursor <= '9') {
+            if (seconds >= CACHE_MAX_AGE_LIMIT_SECONDS) {
+                seconds = CACHE_MAX_AGE_LIMIT_SECONDS;
+                break;
+            }
+            seconds = seconds * 10U + static_cast<uint32_t>(*cursor++ - '0');
+        }
+        return min<uint32_t>(seconds, CACHE_MAX_AGE_LIMIT_SECONDS);
+    }
+
+    time_t responseTime = 0;
+    time_t expirationTime = 0;
+    if (!parseHttpDate(date, responseTime) || !parseHttpDate(expires, expirationTime) ||
+        expirationTime <= responseTime) {
+        return 0;
+    }
+    const double lifetime = difftime(expirationTime, responseTime);
+    return min<uint32_t>(static_cast<uint32_t>(lifetime), CACHE_MAX_AGE_LIMIT_SECONDS);
+}
+
 bool httpGetToPsram(const String& url, size_t limit, uint8_t*& data, size_t& size,
                     uint8_t retries = 1) {
     data = nullptr;
     size = 0;
     if (coverArt.networkPaused()) return false;
+    const bool lastFmApiRequest = isLastFmApiUrl(url);
+    if (lastFmApiRequest && copyLastFmCachedResponse(url, data, size)) return true;
     if (!url.startsWith("http://")) {
         log_w("##[COVER]# non-HTTP URL rejected to preserve audio TLS memory");
         return false;
@@ -591,6 +762,8 @@ bool httpGetToPsram(const String& url, size_t limit, uint8_t*& data, size_t& siz
             http.setRedirectLimit(4);
             http.setUserAgent(HTTP_USER_AGENT);
             if (!http.begin(plainClient, url)) return false;
+            static const char* cacheHeaders[] = {"Cache-Control", "Date", "Expires"};
+            if (lastFmApiRequest) http.collectHeaders(cacheHeaders, 3);
 
             // HTTPClient can spend several seconds parsing a slow response or
             // redirect chain. Let IDLE0 service the task watchdog first.
@@ -615,6 +788,10 @@ bool httpGetToPsram(const String& url, size_t limit, uint8_t*& data, size_t& siz
                 }
                 http.end();
             } else {
+                const uint32_t freshnessSeconds = lastFmApiRequest
+                    ? responseFreshnessSeconds(http.header("Cache-Control"),
+                                               http.header("Date"), http.header("Expires"))
+                    : 0;
                 const int contentLength = http.getSize();
                 if (contentLength > 0 && static_cast<size_t>(contentLength) > limit) {
                     log_w("##[COVER]# response too large: %d bytes (limit=%u)",
@@ -643,6 +820,9 @@ bool httpGetToPsram(const String& url, size_t limit, uint8_t*& data, size_t& siz
 
                 size = sink.size();
                 data = sink.release();
+                if (data && lastFmApiRequest && freshnessSeconds > 0) {
+                    storeLastFmCachedResponse(url, data, size, freshnessSeconds);
+                }
                 return data != nullptr;
             }
         }
@@ -696,27 +876,9 @@ bool httpGetRedirectLocation(const String& url, String& location) {
     return true;
 }
 
-int lastFmImageRank(const char* size) {
-    if (!size) return 0;
-    if (strcmp(size, "mega") == 0) return 5;
-    if (strcmp(size, "extralarge") == 0) return 4;
-    if (strcmp(size, "large") == 0) return 3;
-    if (strcmp(size, "medium") == 0) return 2;
-    if (strcmp(size, "small") == 0) return 1;
-    return 0;
-}
-
-bool isLastFmPlaceholder(const char* url) {
-    if (!url) return true;
-    return strstr(url, "2a96cbd8b46e442fc41c2b86b821562f") != nullptr ||
-           strstr(url, "4128a6eb29f94943c9d206c08e625904") != nullptr;
-}
-
-bool extractLastFmAlbum(const uint8_t* jsonData, size_t jsonSize,
-                        char* mbid, size_t mbidSize,
-                        char* imageUrl, size_t imageUrlSize) {
+bool extractLastFmAlbumMbid(const uint8_t* jsonData, size_t jsonSize,
+                            char* mbid, size_t mbidSize) {
     mbid[0] = '\0';
-    imageUrl[0] = '\0';
     cJSON* root = cJSON_ParseWithLength(reinterpret_cast<const char*>(jsonData), jsonSize);
     if (!root) return false;
 
@@ -725,32 +887,6 @@ bool extractLastFmAlbum(const uint8_t* jsonData, size_t jsonSize,
     cJSON* albumMbid = cJSON_IsObject(album) ? cJSON_GetObjectItemCaseSensitive(album, "mbid") : nullptr;
     if (cJSON_IsString(albumMbid) && albumMbid->valuestring) {
         strlcpy(mbid, albumMbid->valuestring, mbidSize);
-    }
-
-    cJSON* images = cJSON_IsObject(album)
-                        ? cJSON_GetObjectItemCaseSensitive(album, "image")
-                        : nullptr;
-    int bestRank = 0;
-    cJSON* image = nullptr;
-    cJSON_ArrayForEach(image, images) {
-        cJSON* text = cJSON_GetObjectItemCaseSensitive(image, "#text");
-        cJSON* size = cJSON_GetObjectItemCaseSensitive(image, "size");
-        if (!cJSON_IsString(text) || !text->valuestring || text->valuestring[0] == '\0' ||
-            isLastFmPlaceholder(text->valuestring)) {
-            continue;
-        }
-        const int rank = cJSON_IsString(size) ? lastFmImageRank(size->valuestring) : 1;
-        if (rank < bestRank) continue;
-
-        const char* rawUrl = text->valuestring;
-        if (strncmp(rawUrl, "https://", 8) == 0) {
-            snprintf(imageUrl, imageUrlSize, "http://%s", rawUrl + 8);
-        } else if (strncmp(rawUrl, "http://", 7) == 0) {
-            strlcpy(imageUrl, rawUrl, imageUrlSize);
-        } else {
-            continue;
-        }
-        bestRank = rank;
     }
     cJSON_Delete(root);
 
@@ -766,7 +902,7 @@ bool extractLastFmAlbum(const uint8_t* jsonData, size_t jsonSize,
             }
         }
     }
-    return mbid[0] != '\0' || imageUrl[0] != '\0';
+    return mbid[0] != '\0';
 }
 
 bool nextArtistPart(const char*& cursor, char* output, size_t outputSize) {
@@ -1141,34 +1277,13 @@ bool fetchExactCover(const char* artist, const char* title, uint8_t*& imageData,
 
     uint8_t* jsonData = nullptr;
     size_t jsonSize = 0;
-    char albumMbid[40];
-    char lastFmImageUrl[512];
+    char albumMbid[40]{};
     bool haveLastFmMbid = false;
     if (httpGetToPsram(apiUrl, API_RESPONSE_LIMIT, jsonData, jsonSize)) {
-        extractLastFmAlbum(jsonData, jsonSize, albumMbid, sizeof(albumMbid),
-                           lastFmImageUrl, sizeof(lastFmImageUrl));
+        extractLastFmAlbumMbid(jsonData, jsonSize, albumMbid, sizeof(albumMbid));
         haveLastFmMbid = albumMbid[0] != '\0';
         free(jsonData);
         jsonData = nullptr;
-
-        if (lastFmImageUrl[0] != '\0' &&
-            httpGetToPsram(lastFmImageUrl, COVER_IMAGE_LIMIT,
-                           imageData, imageSize, 0)) {
-            if (detectImage(imageData, imageSize, jpeg)) {
-                uint8_t* compact = static_cast<uint8_t*>(ps_malloc(imageSize));
-                if (compact) {
-                    memcpy(compact, imageData, imageSize);
-                    free(imageData);
-                    imageData = compact;
-                }
-                log_d("##[COVER]# using Last.fm album image");
-                return true;
-            }
-            free(imageData);
-            imageData = nullptr;
-            imageSize = 0;
-        }
-        if (coverArt.networkPaused()) return false;
 
         if (haveLastFmMbid &&
             fetchCoverArchive(albumMbid, false, imageData, imageSize, jpeg)) {
@@ -1186,18 +1301,18 @@ bool fetchExactCover(const char* artist, const char* title, uint8_t*& imageData,
 
     MbidCandidates candidates;
     if (coverArt.networkPaused()) return false;
-    if (!findMusicBrainzReleaseGroup(artist, title, candidates)) {
-        return false;
-    }
-    for (size_t i = 0; i < candidates.count; ++i) {
-        if (coverArt.networkPaused()) return false;
-        log_d("##[COVER]# trying release-group %u/%u: %s",
-              static_cast<unsigned>(i + 1), static_cast<unsigned>(candidates.count),
-              candidates.ids[i]);
-        if (fetchCoverArchive(candidates.ids[i], true, imageData, imageSize, jpeg)) {
-            return true;
+    if (findMusicBrainzReleaseGroup(artist, title, candidates)) {
+        for (size_t i = 0; i < candidates.count; ++i) {
+            if (coverArt.networkPaused()) return false;
+            log_d("##[COVER]# trying release-group %u/%u: %s",
+                  static_cast<unsigned>(i + 1), static_cast<unsigned>(candidates.count),
+                  candidates.ids[i]);
+            if (fetchCoverArchive(candidates.ids[i], true, imageData, imageSize, jpeg)) {
+                return true;
+            }
         }
     }
+
     return false;
 }
 

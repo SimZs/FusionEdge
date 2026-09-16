@@ -18,6 +18,10 @@
 #        define TS_STEPS 40
 #    endif
 
+#    ifndef TS_AXIS_LOCK_MARGIN
+#        define TS_AXIS_LOCK_MARGIN 8
+#    endif
+
 // ── Widget területek (conf_480x320.h konstansokkal szinkronban) ──────────────
 // StatusWidget: left=127, top=105, SW=50, SGAP=8, SH=25
 #    define SW_STATUS_L    127
@@ -366,22 +370,25 @@ void TouchScreen::loop() {
                     int16_t distX = abs(touchX - _oldTouchX);
                     int16_t distY = abs(touchY - _oldTouchY);
 
-                    if (distX < 30 && distY < 30) {
-                        direct = TDS_REQUEST;
-                        // MODESELECT: azonnal kijelöli azt az elemet, ami az ujj alatt van
-                        if (display.mode() == MODESELECT) {
-                            constexpr uint16_t MS_TOP  = 137;
-                            constexpr uint16_t MS_H    = 149;
-                            constexpr uint16_t LIST_OFF = 35;
-                            uint8_t cnt = display.msModeCount();
-                            if (cnt > 0 && touchY >= (MS_TOP + LIST_OFF) && touchY < (MS_TOP + MS_H)) {
-                                uint16_t itemH = (MS_H - 40) / cnt;
-                                uint8_t  hovered = (touchY - (MS_TOP + LIST_OFF)) / itemH;
-                                if (hovered < cnt) { display.msHover(hovered); }
+                    // Lock the gesture axis once per touch. Reclassifying every sample
+                    // allowed a noisy vertical playlist drag to become a volume swipe.
+                    if (direct == TDS_REQUEST) {
+                        if (distX < 30 && distY < 30) {
+                            // MODESELECT: azonnal kijelöli azt az elemet, ami az ujj alatt van
+                            if (display.mode() == MODESELECT) {
+                                constexpr uint16_t MS_TOP  = 137;
+                                constexpr uint16_t MS_H    = 149;
+                                constexpr uint16_t LIST_OFF = 35;
+                                uint8_t cnt = display.msModeCount();
+                                if (cnt > 0 && touchY >= (MS_TOP + LIST_OFF) && touchY < (MS_TOP + MS_H)) {
+                                    uint16_t itemH = (MS_H - 40) / cnt;
+                                    uint8_t  hovered = (touchY - (MS_TOP + LIST_OFF)) / itemH;
+                                    if (hovered < cnt) { display.msHover(hovered); }
+                                }
                             }
+                        } else if (abs(distX - distY) >= TS_AXIS_LOCK_MARGIN) {
+                            direct = _tsDirection(touchX, touchY);
                         }
-                    } else {
-                        direct = _tsDirection(touchX, touchY);
                     }
 
                     switch (direct) {
@@ -424,8 +431,13 @@ void TouchScreen::loop() {
                                 _oldTouchY >= SW_VOL_T) {
                                 int16_t yDelta = map(abs(touchStation - touchY), 0, _height, 0, TS_STEPS);
                                 if (yDelta >= 1) {
-                                    display.putRequest(NEWMODE, STATIONS);
-                                    controlsEvent((touchStation - touchY) < 0);
+                                    if (display.mode() == PLAYER) {
+                                        // NEWMODE is asynchronous. Calling controlsEvent here
+                                        // would still see PLAYER and change the volume.
+                                        display.putRequest(NEWMODE, STATIONS);
+                                    } else {
+                                        controlsEvent((touchStation - touchY) < 0);
+                                    }
                                     touchStation = touchY;
                                 }
                             }

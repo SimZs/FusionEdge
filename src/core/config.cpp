@@ -8,6 +8,7 @@
 #include "netserver.h"
 #include "controls.h"
 #include "timekeeper.h"
+#include "../pluginsManager/pluginsManager.h"
 #ifdef USE_LASTFM_COVER
 #    include "coverart.h"
 #endif
@@ -2184,6 +2185,7 @@ void Config::setDspOn(bool dspon, bool saveval) {
 }
 
 void Config::doSleep() {
+    pm.on_sleep();
     if (BRIGHTNESS_PIN != 255) { analogWrite(BRIGHTNESS_PIN, 0); }
     display.deepsleep();
 #ifdef USE_NEXTION
@@ -2218,6 +2220,7 @@ void Config::doSleep() {
 }
 
 void Config::doSleepW() {
+    pm.on_sleep();
     analogWrite(BRIGHTNESS_PIN, 0);           // ← add (MB)
     pinMode(BRIGHTNESS_PIN, OUTPUT);          // ← add (MB)
     digitalWrite(BRIGHTNESS_PIN, LOW);        // ← add (MB)

@@ -45,39 +45,67 @@ void trimUtf8ToWidth(LGFX_Sprite& canvas, char* text, int16_t maxWidth) {
     }
 }
 
+uint8_t wrappedLineCount(LGFX_Sprite& canvas, const char* text,
+                         int16_t maxWidth, uint8_t maxLines) {
+    if (!text || !text[0] || maxWidth <= 0) return 0;
+
+    char line[192] = {};
+    uint8_t lines = 0;
+    const char* cursor = text;
+
+    while (*cursor) {
+        while (*cursor == ' ') ++cursor;
+        if (!*cursor) break;
+
+        char word[96] = {};
+        size_t wordLength = 0;
+        while (*cursor && *cursor != ' ' && wordLength < sizeof(word) - 1) {
+            word[wordLength++] = *cursor++;
+        }
+        word[wordLength] = '\0';
+        if (canvas.textWidth(word) > maxWidth) return maxLines + 1;
+
+        char candidate[192] = {};
+        strlcpy(candidate, line, sizeof(candidate));
+        if (candidate[0]) strlcat(candidate, " ", sizeof(candidate));
+        strlcat(candidate, word, sizeof(candidate));
+
+        if (canvas.textWidth(candidate) <= maxWidth) {
+            strlcpy(line, candidate, sizeof(line));
+        } else {
+            if (line[0]) ++lines;
+            if (lines > maxLines) return lines;
+            strlcpy(line, word, sizeof(line));
+        }
+    }
+
+    if (line[0]) ++lines;
+    return lines;
+}
+
 uint16_t drawWrappedText(LGFX_Sprite& canvas, const char* text,
                          int16_t centerX, int16_t y, int16_t maxWidth,
                          uint8_t wantedSize, uint8_t minimumSize,
-                         uint8_t maxLines) {
+                         uint8_t maxLines, uint16_t maxHeight = 0) {
     if (!text || !text[0] || maxWidth <= 0 || maxLines == 0) return 0;
 
     constexpr uint8_t sizes[] = {36, 26, 24, 22, 20, 18, 16, 12, 9};
     uint8_t size = bestFontSize(wantedSize, minimumSize);
+    uint8_t fallbackSize = size;
 
     for (uint8_t candidate : sizes) {
         if (candidate > size || candidate < minimumSize || !vlwBySize(candidate)) continue;
         loadFont(canvas, vlwBySize(candidate));
-
-        bool wordTooWide = false;
-        const char* cursor = text;
-        while (*cursor) {
-            while (*cursor == ' ') ++cursor;
-            if (!*cursor) break;
-
-            char word[96] = {};
-            size_t length = 0;
-            while (*cursor && *cursor != ' ' && length < sizeof(word) - 1) {
-                word[length++] = *cursor++;
-            }
-            word[length] = '\0';
-            if (canvas.textWidth(word) > maxWidth) {
-                wordTooWide = true;
-                break;
-            }
+        fallbackSize = candidate;
+        const uint8_t lineCount = wrappedLineCount(canvas, text, maxWidth, maxLines);
+        const uint16_t textHeight = lineCount
+                                        ? lineCount * canvas.fontHeight() + (lineCount - 1) * 3
+                                        : 0;
+        if (lineCount <= maxLines && (!maxHeight || textHeight <= maxHeight)) {
+            size = candidate;
+            break;
         }
-
-        size = candidate;
-        if (!wordTooWide) break;
+        size = fallbackSize;
     }
 
     loadFont(canvas, vlwBySize(size));
@@ -152,10 +180,21 @@ void drawClock(LGFX_Sprite& canvas, int16_t x, int16_t y,
     const uint16_t timeWidth = canvas.textWidth(mainTime);
     const uint16_t blockWidth = canvas.textWidth("88:88");
     const uint16_t timeHeight = canvas.fontHeight();
-    int16_t timeX = x + static_cast<int16_t>(blockWidth) - static_cast<int16_t>(timeWidth);
+
+    const char* amPm = hour >= 12 ? "PM" : "AM";
+    uint16_t amPmWidth = 0;
+    if (config.store.clockAmPmStyle) {
+        loadFont(canvas, font_vlw_18);
+        amPmWidth = canvas.textWidth(amPm);
+        loadFont(canvas, mainFont);
+    }
+
+    const int16_t totalWidth = static_cast<int16_t>(blockWidth) +
+                               (config.store.clockAmPmStyle ? 4 + static_cast<int16_t>(amPmWidth) : 0);
+    const int16_t blockX = x + max<int16_t>(0, (maxWidth - totalWidth) / 2);
+    int16_t timeX = blockX + static_cast<int16_t>(blockWidth) - static_cast<int16_t>(timeWidth);
     if (timeX < x) timeX = x;
     if (timeX + timeWidth > x + maxWidth) timeX = x + maxWidth - timeWidth;
-    if (timeX < x) timeX = x;
 
     if (config.store.clockFontStyle == CLOCKFONT_STYLE_DIGI7 && config.store.clockFontMono) {
         const char* ghost = config.store.clockAmPmStyle ? " 8:88" : "88:88";
@@ -172,13 +211,8 @@ void drawClock(LGFX_Sprite& canvas, int16_t x, int16_t y,
     if (!config.store.clockAmPmStyle) return;
 
     loadFont(canvas, font_vlw_18);
-    const char* amPm = hour >= 12 ? "PM" : "AM";
-    const uint16_t amPmWidth = canvas.textWidth(amPm);
     const uint16_t amPmHeight = canvas.fontHeight();
-    const int16_t rightX = x + blockWidth + 4;
-    const int16_t rightWidth = maxWidth > blockWidth + 4 ? maxWidth - blockWidth - 4 : 0;
-    int16_t amPmX = rightX + (rightWidth - static_cast<int16_t>(amPmWidth)) / 2;
-    if (amPmX < rightX) amPmX = rightX;
+    const int16_t amPmX = blockX + static_cast<int16_t>(blockWidth) + 4;
     const int16_t amPmY = y + max<int16_t>(0, static_cast<int16_t>(timeHeight / 4) - static_cast<int16_t>(amPmHeight / 2));
 
     canvas.setTextColor(config.theme.seconds, TFT_BLACK);
@@ -560,31 +594,34 @@ void CoverScreensaverWidget::_draw() {
 
     if (_infoDirty) {
         constexpr int16_t panelX = COVER_WIDTH;
+        constexpr int16_t panelInset = 8;
+        constexpr int16_t contentX = panelX + panelInset;
+        constexpr int16_t contentWidth = PANEL_WIDTH - panelInset * 2;
         constexpr int16_t textWidth = PANEL_WIDTH - 10;
         const int16_t centerX = panelX + PANEL_WIDTH / 2;
 
         _sprite->fillRect(panelX, 0, PANEL_WIDTH, HEIGHT, TFT_BLACK);
         _sprite->drawFastVLine(panelX, 0, HEIGHT, config.theme.date);
 
-        if (_time[0]) drawClock(*_sprite, panelX + 5, 8, textWidth, _time);
+        if (_time[0]) drawClock(*_sprite, contentX, 8, contentWidth, _time);
 
         if (_date[0]) {
             WidgetConfig dateConfig;
             memcpy_P(&dateConfig, &dateConf, sizeof(dateConfig));
             const uint8_t dateSize = dateConfig.textsize > 2 ? dateConfig.textsize - 2 : dateConfig.textsize;
-            _sprite->setTextColor(config.theme.date, TFT_BLACK);
-            drawWrappedText(*_sprite, _date, centerX - 6, 68, textWidth,
-                            dateSize, dateSize, 2);
+            _sprite->setTextColor(config.theme.date, config.theme.date);
+            drawWrappedText(*_sprite, _date, centerX, 68, contentWidth,
+                            dateSize, 9, 3, 56);
         }
 
         uint16_t artistHeight = 0;
         if (_artist[0]) {
-            _sprite->setTextColor(config.theme.title1, TFT_BLACK);
+            _sprite->setTextColor(config.theme.title1, config.theme.title1);
             artistHeight = drawWrappedText(*_sprite, _artist, centerX, 132,
                                            textWidth, 20, 14, 3);
         }
         if (_title[0]) {
-            _sprite->setTextColor(config.theme.title2, TFT_BLACK);
+            _sprite->setTextColor(config.theme.title2, config.theme.title2);
             const int16_t titleY = _artist[0] ? 140 + artistHeight : 164;
             drawWrappedText(*_sprite, _title, centerX, titleY,
                             textWidth, 16, 12, 3);
@@ -592,14 +629,22 @@ void CoverScreensaverWidget::_draw() {
 
         if (_temperature[0]) {
             constexpr int16_t weatherY = 252;
+            constexpr int16_t weatherIconSize = 64;
+            constexpr int16_t weatherGap = 6;
+            loadFont(*_sprite, font_vlw_20);
+            const int16_t temperatureWidth = _sprite->textWidth(_temperature);
+            const int16_t iconWidth = (_weatherData && _weatherSize) ? weatherIconSize : 0;
+            const int16_t groupGap = iconWidth ? weatherGap : 0;
+            const int16_t groupWidth = iconWidth + groupGap + temperatureWidth;
+            const int16_t groupX = contentX + max<int16_t>(0, (contentWidth - groupWidth) / 2);
             if (_weatherData && _weatherSize) {
                 _sprite->drawPng(_weatherData, _weatherSize,
-                                 panelX + 5, weatherY, 64, 64);
+                                 groupX, weatherY, weatherIconSize, weatherIconSize);
             }
-            loadFont(*_sprite, font_vlw_20);
-            _sprite->setTextColor(config.theme.weatherIconTxt, TFT_BLACK);
+            _sprite->setTextColor(config.theme.weatherIconTxt, config.theme.weatherIconTxt);
             _sprite->setTextDatum(middle_left);
-            _sprite->drawString(_temperature, panelX + 86, weatherY + 32);
+            _sprite->drawString(_temperature, groupX + iconWidth + groupGap,
+                                weatherY + weatherIconSize / 2);
             if (font_vlw_20) _sprite->unloadFont();
         }
         _infoDirty = false;
